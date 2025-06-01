@@ -83,7 +83,7 @@ const Landing = () => {
               fontWeight: 700 
             }}
           >
-            RecruitLink
+            Athlete Connect 
           </Typography>
           <Typography 
             variant="h4" 
@@ -336,7 +336,7 @@ const Landing = () => {
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center', alignItems: 'center', mb: { xs: 3, sm: 2 } }}>
             <Box sx={{ width: { xs: '100%', sm: 'auto' }, textAlign: 'center' }}>
               <Typography variant="body2" color="white" sx={{ opacity: 0.7, fontSize: { xs: '1rem', sm: '0.875rem' }, py: { xs: 1, sm: 0 } }}>
-                About RecruitLink
+                About Athlete Connect
               </Typography>
             </Box>
             <Box sx={{ width: { xs: '100%', sm: 'auto' }, textAlign: 'center' }}>

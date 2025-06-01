@@ -6,55 +6,26 @@ interface AdminAuthContextType {
   logout: () => void;
 }
 
-export const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
-
-export const useAdminAuth = () => {
-  const context = useContext(AdminAuthContext);
-  if (context === undefined) {
-    throw new Error('useAdminAuth must be used within an AdminAuthProvider');
-  }
-  return context;
-};
+const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
 export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Check admin status on mount and when storage changes
   useEffect(() => {
-    const checkAdminStatus = () => {
-      const adminSession = localStorage.getItem('isAdmin') === 'true' && 
-                          sessionStorage.getItem('isAdmin') === 'true';
-      console.log('AdminAuthProvider - Checking admin status:', {
-        localStorage: localStorage.getItem('isAdmin'),
-        sessionStorage: sessionStorage.getItem('isAdmin'),
-        adminSession
-      });
-      setIsAdmin(adminSession);
-    };
-
-    // Check initial status
-    checkAdminStatus();
-
-    // Listen for storage changes
-    const handleStorageChange = () => {
-      checkAdminStatus();
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    // Check if admin session exists
+    const adminSession = localStorage.getItem('adminSession');
+    if (adminSession) {
+      setIsAdmin(true);
+    }
   }, []);
 
   const login = () => {
-    console.log('AdminAuthProvider - Setting admin status to true');
-    localStorage.setItem('isAdmin', 'true');
-    sessionStorage.setItem('isAdmin', 'true');
+    localStorage.setItem('adminSession', 'true');
     setIsAdmin(true);
   };
 
   const logout = () => {
-    console.log('AdminAuthProvider - Setting admin status to false');
-    localStorage.removeItem('isAdmin');
-    sessionStorage.removeItem('isAdmin');
+    localStorage.removeItem('adminSession');
     setIsAdmin(false);
   };
 
@@ -63,4 +34,12 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       {children}
     </AdminAuthContext.Provider>
   );
+};
+
+export const useAdminAuth = () => {
+  const context = useContext(AdminAuthContext);
+  if (context === undefined) {
+    throw new Error('useAdminAuth must be used within an AdminAuthProvider');
+  }
+  return context;
 }; 

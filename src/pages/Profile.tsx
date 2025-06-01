@@ -56,14 +56,17 @@ import {
   Business,
   Settings,
 } from '@mui/icons-material';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
 import { User } from '../types/user';
 import Header from '../components/layout/Header';
 import { Link as RouterLink } from 'react-router-dom';
 import { uploadToCloudinary } from '../config/cloudinary';
-import { getUserProfile } from '../services/user.service';
+import { getUserProfile, updateUserProfile, updateSocialLinks } from '../services/user.service';
 import { useSnackbar } from 'notistack';
+import { linkSocialAccount } from '../services/social-auth.service';
+import { setUser } from '../store/slices/authSlice';
+import LocationAutocomplete from '../components/LocationAutocomplete';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -226,6 +229,7 @@ const mockAthleteStats = {
 
 const Profile = () => {
   const { userId } = useParams();
+  const dispatch = useDispatch();
   const currentUser = useSelector((state: RootState) => state.auth.user);
   const [activeTab, setActiveTab] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
@@ -299,11 +303,78 @@ const Profile = () => {
   };
 
   const handleSaveProfile = async () => {
-    if (!profileData) return;
+    if (!profileData || !currentUser) return;
 
     try {
       setLoading(true);
-      // TODO: Implement API call to save profile data
+      
+      // Create an object with only the fields that exist in profileData
+      const updateData: Partial<User> = {};
+      
+      // Common fields for all user types
+      if (profileData.bio !== undefined) updateData.bio = profileData.bio;
+      if (profileData.location !== undefined) updateData.location = profileData.location;
+      if (profileData.contactInfo !== undefined) updateData.contactInfo = profileData.contactInfo;
+      
+      // User type specific fields
+      if (profileData.userType === 'athlete') {
+        if (profileData.sport !== undefined) updateData.sport = profileData.sport;
+        if (profileData.position !== undefined) updateData.position = profileData.position;
+        if (profileData.team !== undefined) updateData.team = profileData.team;
+        if (profileData.dateOfBirth !== undefined) updateData.dateOfBirth = profileData.dateOfBirth;
+        if (profileData.height !== undefined) updateData.height = profileData.height;
+        if (profileData.weight !== undefined) updateData.weight = profileData.weight;
+        if (profileData.experience !== undefined) updateData.experience = profileData.experience;
+        if (profileData.careerStats !== undefined) updateData.careerStats = profileData.careerStats;
+        if (profileData.awards !== undefined) updateData.awards = profileData.awards;
+        if (profileData.trainingSchedule !== undefined) updateData.trainingSchedule = profileData.trainingSchedule;
+        if (profileData.availability !== undefined) updateData.availability = profileData.availability;
+      }
+      
+      if (profileData.userType === 'coach') {
+        if (profileData.sport !== undefined) updateData.sport = profileData.sport;
+        if (profileData.team !== undefined) updateData.team = profileData.team;
+        if (profileData.experience !== undefined) updateData.experience = profileData.experience;
+        if (profileData.focus !== undefined) updateData.focus = profileData.focus;
+        if (profileData.certifications !== undefined) updateData.certifications = profileData.certifications;
+        if (profileData.achievements !== undefined) updateData.achievements = profileData.achievements;
+        if (profileData.philosophy !== undefined) updateData.philosophy = profileData.philosophy;
+        if (profileData.availability !== undefined) updateData.availability = profileData.availability;
+      }
+      
+      if (profileData.userType === 'team') {
+        if (profileData.sport !== undefined) updateData.sport = profileData.sport;
+        if (profileData.affiliation !== undefined) updateData.affiliation = profileData.affiliation;
+        if (profileData.roster !== undefined) updateData.roster = profileData.roster;
+        if (profileData.recentMatches !== undefined) updateData.recentMatches = profileData.recentMatches;
+        if (profileData.record !== undefined) updateData.record = profileData.record;
+        if (profileData.recruitingStatus !== undefined) updateData.recruitingStatus = profileData.recruitingStatus;
+        if (profileData.upcomingTryouts !== undefined) updateData.upcomingTryouts = profileData.upcomingTryouts;
+      }
+      
+      if (profileData.userType === 'company') {
+        if (profileData.industry !== undefined) updateData.industry = profileData.industry;
+        if (profileData.companyBio !== undefined) updateData.companyBio = profileData.companyBio;
+        if (profileData.sponsorshipPrograms !== undefined) updateData.sponsorshipPrograms = profileData.sponsorshipPrograms;
+        if (profileData.activeCampaigns !== undefined) updateData.activeCampaigns = profileData.activeCampaigns;
+        if (profileData.collaborations !== undefined) updateData.collaborations = profileData.collaborations;
+        if (profileData.socialProof !== undefined) updateData.socialProof = profileData.socialProof;
+      }
+
+      // Update profile data
+      await updateUserProfile(currentUser.uid, updateData);
+      
+      // Update social links if they exist
+      if (profileData.socialLinks) {
+        const cleanedSocialLinks = {
+          instagram: profileData.socialLinks.instagram || '',
+          twitter: profileData.socialLinks.twitter || '',
+          linkedin: profileData.socialLinks.linkedin || '',
+          youtube: profileData.socialLinks.youtube || '',
+        };
+        await updateSocialLinks(currentUser.uid, cleanedSocialLinks);
+      }
+      
       setIsEditing(false);
       enqueueSnackbar('Profile updated successfully', { variant: 'success' });
     } catch (error) {
@@ -326,8 +397,58 @@ const Profile = () => {
     });
   };
 
+  const handleSocialLinkClick = async (platform: string) => {
+    if (!currentUser) {
+      enqueueSnackbar('Please sign in to link your social media accounts', { variant: 'error' });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const { success, cancelled, profileUrl } = await linkSocialAccount(platform, currentUser.uid);
+      
+      if (cancelled) {
+        // User cancelled the popup - no need to show any error message
+        return;
+      }
+      
+      if (success && profileUrl) {
+        // Update local state
+        setProfileData(prev => ({
+          ...prev!,
+          socialLinks: {
+            ...prev!.socialLinks,
+            [platform]: profileUrl
+          }
+        }));
+        enqueueSnackbar(`Successfully linked your ${platform} account!`, { variant: 'success' });
+      }
+    } catch (error: any) {
+      console.error('Error linking social account:', error);
+      
+      // For setup instructions (multi-line error messages), use a dialog
+      if (error.message.includes('Authentication provider') && error.message.includes('not enabled')) {
+        // Show setup instructions in a dialog
+        enqueueSnackbar('Provider not enabled. Check console for setup instructions.', { 
+          variant: 'warning',
+          autoHideDuration: 10000,
+        });
+        // Log setup instructions in a formatted way
+        console.log('\n' + error.message);
+      } else {
+        // For other errors, show in snackbar
+        enqueueSnackbar(error.message || `Failed to link ${platform} account`, { 
+          variant: 'error',
+          autoHideDuration: 6000,
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video' = 'image') => {
-    if (!profileData) return;
+    if (!profileData || !currentUser) return;
 
     const file = event.target.files?.[0];
     if (!file) return;
@@ -337,18 +458,31 @@ const Profile = () => {
       const url = await uploadToCloudinary(file, type);
       if (type === 'image') {
         // Update profile picture
-        setProfileData({
+        const updatedData = {
           ...profileData,
           photoURL: url,
-        });
-        // TODO: Update user profile in backend/firebase
+        };
+        setProfileData(updatedData);
+        
+        // Update user profile in Firebase
+        await updateUserProfile(currentUser.uid, { photoURL: url });
+        
+        // Update Redux store
+        dispatch(setUser({ ...currentUser, photoURL: url }));
+        
+        enqueueSnackbar('Profile picture updated successfully', { variant: 'success' });
       } else {
         // Handle video upload for athlete highlights
         const videos = profileData.videos || [];
-        setProfileData({
+        const updatedData = {
           ...profileData,
           videos: [...videos, url],
-        });
+        };
+        setProfileData(updatedData);
+        
+        // Update videos in Firebase
+        await updateUserProfile(currentUser.uid, { videos: [...videos, url] });
+        enqueueSnackbar('Video uploaded successfully', { variant: 'success' });
       }
     } catch (error) {
       console.error('Upload failed:', error);
@@ -364,23 +498,57 @@ const Profile = () => {
     return Object.entries(profileData.socialLinks).map(([platform, url]) => (
       <ListItem key={platform}>
         <ListItemAvatar>
-          <Avatar>
-            {platform === 'instagram' && <Instagram />}
-            {platform === 'twitter' && <Twitter />}
-            {platform === 'linkedin' && <LinkedIn />}
-            {platform === 'youtube' && <YouTube />}
-          </Avatar>
+          <IconButton 
+            onClick={() => handleSocialLinkClick(platform)}
+            sx={{ 
+              '&:hover': { 
+                transform: 'scale(1.1)',
+                transition: 'transform 0.2s'
+              } 
+            }}
+            disabled={loading}
+          >
+            <Avatar sx={{ 
+              bgcolor: url ? 'success.main' : 'primary.main',
+              opacity: loading ? 0.7 : 1
+            }}>
+              {loading ? (
+                <CircularProgress size={24} color="inherit" />
+              ) : (
+                <>
+                  {platform === 'instagram' && <Instagram />}
+                  {platform === 'twitter' && <Twitter />}
+                  {platform === 'linkedin' && <LinkedIn />}
+                  {platform === 'youtube' && <YouTube />}
+                </>
+              )}
+            </Avatar>
+          </IconButton>
         </ListItemAvatar>
         <ListItemText
-          primary={platform.charAt(0).toUpperCase() + platform.slice(1)}
-          secondary={isEditing ? (
-            <TextField
-              fullWidth
-              size="small"
-              value={url || ''}
-              onChange={(e) => handleSocialLinkChange(platform as keyof User['socialLinks'], e.target.value)}
-            />
-          ) : url || 'Not linked'}
+          primary={
+            <Box display="flex" alignItems="center">
+              <Typography>
+                {platform.charAt(0).toUpperCase() + platform.slice(1)}
+              </Typography>
+              {url && (
+                <Tooltip title="Account linked">
+                  <Check sx={{ ml: 1, color: 'success.main', fontSize: 16 }} />
+                </Tooltip>
+              )}
+            </Box>
+          }
+          secondary={
+            <Typography variant="body2" color="textSecondary">
+              {url ? (
+                <Link href={url} target="_blank" rel="noopener noreferrer">
+                  View Profile
+                </Link>
+              ) : (
+                'Click icon to link account'
+              )}
+            </Typography>
+          }
         />
       </ListItem>
     ));
@@ -575,16 +743,32 @@ const Profile = () => {
             )}
           </Box>
           {isEditing ? (
-            <TextField
-              fullWidth
-              multiline
-              rows={4}
-              value={profileData.bio || ''}
-              onChange={(e) => setProfileData({ ...profileData, bio: e.target.value })}
-              placeholder="Tell us about yourself..."
-            />
+            <>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={profileData.bio || ''}
+                onChange={(e) => setProfileData({ ...profileData, bio: e.target.value })}
+                placeholder="Tell us about yourself..."
+                sx={{ mb: 2 }}
+              />
+              <LocationAutocomplete
+                value={profileData.location || ''}
+                onChange={(location) => setProfileData({ ...profileData, location })}
+                disabled={!isEditing}
+              />
+            </>
           ) : (
-            <Typography>{profileData.bio || 'No bio added yet.'}</Typography>
+            <>
+              <Typography sx={{ mb: 2 }}>{profileData.bio || 'No bio added yet.'}</Typography>
+              {profileData.location && (
+                <Box display="flex" alignItems="center">
+                  <LocationOn sx={{ mr: 1, color: 'action.active' }} />
+                  <Typography color="textSecondary">{profileData.location}</Typography>
+                </Box>
+              )}
+            </>
           )}
         </Paper>
       </Box>
@@ -1111,6 +1295,9 @@ const Profile = () => {
       <Box sx={{ width: { xs: '100%', md: '48%' } }}>
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>Social Media</Typography>
+          <Typography variant="body2" color="textSecondary" paragraph>
+            Click on the social media icons to set up your profiles
+          </Typography>
           <List>
             {renderSocialLinks()}
           </List>

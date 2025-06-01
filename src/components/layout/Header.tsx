@@ -149,7 +149,7 @@ const Header = () => {
           component="div"
           sx={{ display: { xs: 'none', sm: 'block' }, ml: 1 }}
         >
-          RecruitLink
+          Athlete Connect
         </Typography>
 
         <Search>
@@ -181,9 +181,35 @@ const Header = () => {
             color="inherit"
           >
             {user?.photoURL ? (
-              <Avatar src={user.photoURL} />
+              <Avatar 
+                src={user.photoURL}
+                sx={{
+                  width: 40,
+                  height: 40,
+                  border: '2px solid',
+                  borderColor: 'background.paper',
+                  '&:hover': {
+                    transform: 'scale(1.05)',
+                    transition: 'transform 0.2s'
+                  }
+                }}
+              />
             ) : (
-              <Avatar>{user?.displayName?.[0]}</Avatar>
+              <Avatar
+                sx={{
+                  width: 40,
+                  height: 40,
+                  bgcolor: 'primary.main',
+                  border: '2px solid',
+                  borderColor: 'background.paper',
+                  '&:hover': {
+                    transform: 'scale(1.05)',
+                    transition: 'transform 0.2s'
+                  }
+                }}
+              >
+                {user?.displayName?.[0]?.toUpperCase() || <AccountCircle />}
+              </Avatar>
             )}
           </IconButton>
         </Box>
@@ -195,9 +221,42 @@ const Header = () => {
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
         onClick={handleMenuClose}
+        PaperProps={{
+          sx: {
+            mt: 1,
+            '& .MuiMenuItem-root': {
+              py: 1,
+              px: 2,
+            },
+          },
+        }}
       >
         <MenuItem onClick={handleProfileClick}>
-          <AccountCircle sx={{ mr: 2 }} />
+          {user?.photoURL ? (
+            <Avatar 
+              src={user.photoURL}
+              sx={{
+                width: 32,
+                height: 32,
+                mr: 2,
+                border: '2px solid',
+                borderColor: 'background.paper'
+              }}
+            />
+          ) : (
+            <Avatar
+              sx={{
+                width: 32,
+                height: 32,
+                mr: 2,
+                bgcolor: 'primary.main',
+                border: '2px solid',
+                borderColor: 'background.paper'
+              }}
+            >
+              {user?.displayName?.[0]?.toUpperCase() || <AccountCircle />}
+            </Avatar>
+          )}
           Profile
         </MenuItem>
         <MenuItem onClick={handleDashboardClick}>
@@ -218,12 +277,45 @@ const Header = () => {
         anchorEl={mobileMenuAnchorEl}
         open={Boolean(mobileMenuAnchorEl)}
         onClose={() => setMobileMenuAnchorEl(null)}
+        PaperProps={{
+          sx: {
+            mt: 1,
+            '& .MuiMenuItem-root': {
+              py: 1,
+              px: 2,
+            },
+          },
+        }}
       >
         <MenuItem onClick={handleProfileClick}>
-          <IconButton color="inherit">
-            <AccountCircle />
-          </IconButton>
-          Profile
+          <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+            {user?.photoURL ? (
+              <Avatar 
+                src={user.photoURL}
+                sx={{
+                  width: 32,
+                  height: 32,
+                  mr: 2,
+                  border: '2px solid',
+                  borderColor: 'background.paper'
+                }}
+              />
+            ) : (
+              <Avatar
+                sx={{
+                  width: 32,
+                  height: 32,
+                  mr: 2,
+                  bgcolor: 'primary.main',
+                  border: '2px solid',
+                  borderColor: 'background.paper'
+                }}
+              >
+                {user?.displayName?.[0]?.toUpperCase() || <AccountCircle />}
+              </Avatar>
+            )}
+            <Typography>Profile</Typography>
+          </Box>
         </MenuItem>
         <MenuItem onClick={handleDashboardClick}>
           <IconButton color="inherit">
