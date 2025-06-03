@@ -12,7 +12,7 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { Message } from '../types';
+import { Message } from '../types/message';
 
 export const sendMessage = async (messageData: Omit<Message, 'id' | 'timestamp' | 'read'>): Promise<Message> => {
   try {
@@ -38,7 +38,7 @@ export const getConversation = async (userId1: string, userId2: string): Promise
     const q = query(
       collection(db, 'messages'),
       where('senderId', 'in', [userId1, userId2]),
-      where('receiverId', 'in', [userId1, userId2]),
+      where('recipientId', 'in', [userId1, userId2]),
       orderBy('timestamp', 'desc')
     );
 
@@ -66,7 +66,7 @@ export const getUnreadMessages = async (userId: string): Promise<Message[]> => {
   try {
     const q = query(
       collection(db, 'messages'),
-      where('receiverId', '==', userId),
+      where('recipientId', '==', userId),
       where('read', '==', false),
       orderBy('timestamp', 'desc')
     );
@@ -114,8 +114,8 @@ export const getRecentConversations = async (userId: string): Promise<Message[]>
 
     querySnapshot.docs.forEach(doc => {
       const messageData = doc.data() as Omit<Message, 'id'>;
-      if (!conversations.has(messageData.receiverId)) {
-        conversations.set(messageData.receiverId, {
+      if (!conversations.has(messageData.recipientId)) {
+        conversations.set(messageData.recipientId, {
           id: doc.id,
           ...messageData,
         });

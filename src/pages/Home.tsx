@@ -188,7 +188,7 @@ const roleBasedPosts: Record<string, Post[]> = {
       shares: 0,
     },
   ],
-  company: [
+  sponsor: [
     {
       id: 'co1',
       type: 'performance',
@@ -284,7 +284,7 @@ const LeftSidebar = () => {
           { icon: <PeopleIcon />, label: 'Connections', path: '/connections' },
           { icon: <GroupsIcon />, label: 'Team Management', path: '/team-management' },
         ];
-      case 'company':
+      case 'sponsor':
         return [
           { icon: <HomeIcon />, label: 'Feed', path: '/home', emoji: '🏢' },
           { icon: <ExploreIcon />, label: 'Explore', path: '/explore' },
@@ -560,7 +560,7 @@ const MainFeed = () => {
         {user?.userType === 'athlete' && 'Your Performance & Updates'}
         {user?.userType === 'coach' && 'Athlete Insights & Applications'}
         {user?.userType === 'team' && 'Team Updates & Opportunities'}
-        {user?.userType === 'company' && 'Sponsorship Analytics & Requests'}
+        {user?.userType === 'sponsor' && 'Sponsorship Analytics & Requests'}
       </Typography>
 
       {/* Posts Feed */}
@@ -698,7 +698,7 @@ const MainFeed = () => {
           {user?.userType === 'athlete' && 'Training tips and performance insights'}
           {user?.userType === 'coach' && 'Recruiting strategies and athlete development'}
           {user?.userType === 'team' && 'Team management and event planning'}
-          {user?.userType === 'company' && 'Sponsorship opportunities and brand growth'}
+          {user?.userType === 'sponsor' && 'Sponsorship opportunities and brand growth'}
         </Typography>
       </Paper>
     </Box>

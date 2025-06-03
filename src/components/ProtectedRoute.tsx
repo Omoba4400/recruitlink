@@ -2,11 +2,11 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
-import { User } from '../types/user';
+import { UserType } from '../types/user';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: User['userType'];
+  requiredRole?: UserType;
   adminRequired?: boolean;
 }
 
@@ -16,7 +16,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   adminRequired = false,
 }) => {
   const user = useSelector((state: RootState) => state.auth.user);
-  const emailVerified = useSelector((state: RootState) => state.auth.emailVerified);
+  const emailVerified = user?.emailVerified ?? false;
 
   if (!user) {
     return <Navigate to={adminRequired ? "/admin/login" : "/login"} replace />;

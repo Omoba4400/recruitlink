@@ -27,7 +27,7 @@ import {
 } from 'firebase/firestore';
 import { ref, deleteObject, listAll } from 'firebase/storage';
 import { auth, db, storage } from '../config/firebase';
-import { User } from '../types/user';
+import { User, UserType } from '../types/user';
 
 const handleAuthError = (error: AuthError): never => {
   let message = 'An error occurred during authentication.';
@@ -99,20 +99,32 @@ const createUserDocument = async (
   displayName: string,
   userType: User['userType']
 ): Promise<User> => {
-  const userData: User = {
+  const timestamp = new Date().toISOString();
+  
+  const baseUserData: User = {
     uid: firebaseUser.uid,
     id: firebaseUser.uid,
     email: firebaseUser.email || '',
     displayName: firebaseUser.displayName || displayName,
     userType,
-    photoURL: firebaseUser.photoURL,
-    createdAt: new Date().toISOString(),
-    lastLogin: new Date().toISOString(),
+    photoURL: firebaseUser.photoURL || '',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLogin: timestamp,
     bio: '',
     location: '',
-    isVerified: false,
+    verified: false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: false,
+    verificationStatus: 'none',
+    privacySettings: {
+      profileVisibility: 'public',
+      allowMessagesFrom: 'everyone',
+      showEmail: true,
+      showLocation: true,
+      showAcademicInfo: true,
+      showAthleteStats: true
+    },
     socialLinks: {
       instagram: '',
       twitter: '',
@@ -124,6 +136,84 @@ const createUserDocument = async (
     connections: []
   };
 
+  let typeSpecificData = {};
+
+  if (userType === 'athlete') {
+    typeSpecificData = {
+      athleteInfo: {
+        sports: [{
+          sport: '',
+          position: '',
+          level: '',
+          experience: 0,
+          specialties: [],
+          achievements: []
+        }],
+        academicInfo: {
+          currentSchool: '',
+          graduationYear: ''
+        },
+        verificationStatus: 'pending' as const,
+        media: [],
+        memberships: [],
+        interests: [],
+        activities: [],
+        awards: [],
+        achievements: [],
+        eligibility: {
+          isEligible: true
+        },
+        recruitingStatus: 'open' as const
+      }
+    };
+  } else if (userType === 'coach') {
+    typeSpecificData = {
+      coachInfo: {
+        specialization: [],
+        experience: '',
+        certifications: [],
+        canMessageAthletes: false,
+        verificationStatus: 'pending' as const
+      }
+    };
+  } else if (userType === 'team') {
+    typeSpecificData = {
+      teamInfo: {
+        teamName: '',
+        sport: '',
+        canMessageAthletes: false,
+        achievements: [],
+        roster: [],
+        openPositions: []
+      }
+    };
+  } else if (userType === 'sponsor') {
+    typeSpecificData = {
+      sponsorInfo: {
+        companyName: '',
+        industry: '',
+        canMessageAthletes: false,
+        sponsorshipTypes: [],
+        activeOpportunities: []
+      }
+    };
+  } else if (userType === 'media') {
+    typeSpecificData = {
+      mediaInfo: {
+        organization: '',
+        canMessageAthletes: false,
+        coverageAreas: [],
+        mediaType: []
+      }
+    };
+  }
+
+  const userData = {
+    ...baseUserData,
+    ...typeSpecificData
+  } as User;
+
+  // Create the user document in Firestore
   await setDoc(doc(db, 'users', firebaseUser.uid), userData);
   return userData;
 };
@@ -134,16 +224,26 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     id: firebaseUser.uid,
     uid: firebaseUser.uid,
     email: firebaseUser.email || '',
-    displayName: firebaseUser.displayName,
-    photoURL: firebaseUser.photoURL,
+    displayName: firebaseUser.displayName || '',
+    photoURL: firebaseUser.photoURL || undefined,
     userType: (userType as User['userType']) || 'athlete',
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
     bio: '',
     location: '',
-    isVerified: false,
+    verified: false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: false,
+    verificationStatus: 'none',
+    privacySettings: {
+      profileVisibility: 'public',
+      allowMessagesFrom: 'everyone',
+      showEmail: true,
+      showLocation: true,
+      showAcademicInfo: true,
+      showAthleteStats: true
+    },
     socialLinks: {
       instagram: '',
       twitter: '',
@@ -156,54 +256,73 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
   };
 };
 
+interface AuthResponse {
+  user: FirebaseUser;
+  userType: UserType;
+}
+
 export const registerUser = async (
   email: string,
   password: string,
   displayName: string,
-  userType: User['userType']
-): Promise<{ user: User; emailVerified: boolean }> => {
+  userType: UserType
+): Promise<{ user: FirebaseUser; userData: User; userType: UserType }> => {
   try {
     validateRegistrationData(email, password, displayName);
     
-    console.log('Starting registration with:', { email, displayName, userType });
-    
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const { user } = userCredential;
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
 
-      console.log('User created successfully:', user.uid);
+    // Update the user's display name in Firebase Auth
+    await updateProfile(user, { displayName });
 
-      await updateProfile(user, { displayName });
-      console.log('Profile updated with displayName');
+    // Create the user document in Firestore with all necessary fields
+    const timestamp = new Date().toISOString();
+    const userData: User = {
+      id: user.uid,
+      uid: user.uid,
+      email: user.email || '',
+      displayName: displayName,
+      userType,
+      photoURL: user.photoURL || '',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      lastLogin: timestamp,
+      bio: '',
+      location: '',
+      verified: false,
+      emailVerified: user.emailVerified,
+      isAdmin: false,
+      verificationStatus: 'none',
+      privacySettings: {
+        profileVisibility: 'public',
+        allowMessagesFrom: 'everyone',
+        showEmail: true,
+        showLocation: true,
+        showAcademicInfo: true,
+        showAthleteStats: true
+      },
+      socialLinks: {
+        instagram: '',
+        twitter: '',
+        linkedin: '',
+        youtube: '',
+      },
+      followers: [],
+      following: [],
+      connections: []
+    };
 
-      // Send email verification
-      await sendEmailVerification(user);
-      console.log('Verification email sent');
+    // Create the user document in Firestore
+    await setDoc(doc(db, 'users', user.uid), userData);
 
-      const userData = await createUserDocument(user, displayName, userType);
-      console.log('User data saved to Firestore');
-      
-      return {
-        user: userData,
-        emailVerified: user.emailVerified
-      };
-    } catch (error: any) {
-      if (error.code === 'auth/email-already-in-use') {
-        throw new Error('This email is already registered. Please sign in instead.');
-      }
-      throw error;
-    }
+    // Send email verification
+    await sendEmailVerification(user);
+
+    return { user, userData, userType };
   } catch (error: any) {
-    console.error('Registration error:', {
-      code: error.code,
-      message: error.message,
-      fullError: error
-    });
-    
-    if (error instanceof Error && 'code' in error) {
-      handleAuthError(error as AuthError);
-    }
-    throw error;
+    console.error('Registration error:', error);
+    throw new Error(error.message);
   }
 };
 
@@ -215,135 +334,26 @@ export const checkEmailVerification = async (): Promise<boolean> => {
 
   // Reload the user to get the latest emailVerified status
   await reload(user);
+  
+  if (user.emailVerified) {
+    // Update the user document in Firestore with emailVerified status
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, {
+      emailVerified: true,
+      updatedAt: new Date().toISOString()
+    });
+  }
+  
   return user.emailVerified;
 };
 
-export const loginUser = async (
-  email: string, 
-  password: string, 
-  isAdminLogin: boolean = false
-): Promise<{ user: User; emailVerified: boolean }> => {
+export const loginUser = async (email: string, password: string): Promise<FirebaseUser> => {
   try {
-    if (!email || !password) {
-      throw new Error('Please enter your email and password.');
-    }
-
-    console.log('Login attempt:', { email, isAdminLogin });
-
-    // Hardcoded admin credentials check
-    if (isAdminLogin) {
-      if (email === 'admin@athleteconnect.com' && password === 'athleteconnect') {
-        console.log('Valid admin credentials provided');
-        
-        const adminData: User = {
-          uid: 'admin',
-          id: 'admin',
-          email: 'admin@athleteconnect.com',
-          displayName: 'Admin',
-          userType: 'company',
-          photoURL: null,
-          createdAt: new Date().toISOString(),
-          lastLogin: new Date().toISOString(),
-          bio: 'System Administrator',
-          location: '',
-          isVerified: true,
-          emailVerified: true,
-          isAdmin: true,
-          socialLinks: {
-            instagram: '',
-            twitter: '',
-            linkedin: '',
-            youtube: '',
-          },
-          followers: [],
-          following: [],
-          connections: []
-        };
-
-        return { user: adminData, emailVerified: true };
-      } else {
-        throw new Error('Invalid admin credentials');
-      }
-    }
-
-    // Regular user login
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const { user: firebaseUser } = userCredential;
-      
-      // Try to get the user document
-      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-
-      let userData: User;
-
-      if (!userDoc.exists()) {
-        console.log('Creating missing user document in Firestore');
-        // Create user document if it doesn't exist
-        userData = {
-          uid: firebaseUser.uid,
-          id: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          displayName: firebaseUser.displayName || email.split('@')[0],
-          userType: 'athlete', // Default to athlete
-          photoURL: firebaseUser.photoURL,
-          createdAt: new Date().toISOString(),
-          lastLogin: new Date().toISOString(),
-          bio: '',
-          location: '',
-          isVerified: false,
-          emailVerified: firebaseUser.emailVerified,
-          isAdmin: false,
-          socialLinks: {
-            instagram: '',
-            twitter: '',
-            linkedin: '',
-            youtube: '',
-          },
-          followers: [],
-          following: [],
-          connections: []
-        };
-
-        // Save the new user document
-        await setDoc(doc(db, 'users', firebaseUser.uid), userData);
-      } else {
-        userData = userDoc.data() as User;
-        
-        // Update lastLogin
-        await updateDoc(doc(db, 'users', firebaseUser.uid), {
-          lastLogin: new Date().toISOString(),
-          emailVerified: firebaseUser.emailVerified
-        });
-      }
-
-      if (isAdminLogin && !userData.isAdmin) {
-        throw new Error('This account does not have admin privileges');
-      }
-
-      return {
-        user: userData,
-        emailVerified: firebaseUser.emailVerified
-      };
-    } catch (error: any) {
-      if (error.code === 'auth/user-not-found') {
-        throw new Error('Account not found. Please sign up first.');
-      }
-      if (error.code === 'auth/wrong-password') {
-        throw new Error('Incorrect password. Please try again.');
-      }
-      throw error;
-    }
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return userCredential.user;
   } catch (error: any) {
-    console.error('Login error:', {
-      code: error.code,
-      message: error.message,
-      fullError: error
-    });
-    
-    if (error instanceof Error && 'code' in error) {
-      handleAuthError(error as AuthError);
-    }
-    throw error;
+    console.error('Login error:', error);
+    throw new Error(error.message);
   }
 };
 
@@ -370,12 +380,12 @@ export const sendPasswordReset = async (email: string) => {
   }
 };
 
-export const logoutUser = async () => {
+export const logoutUser = async (): Promise<void> => {
   try {
     await signOut(auth);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Logout error:', error);
-    throw new Error('Failed to log out. Please try again.');
+    throw new Error(error.message);
   }
 };
 
@@ -427,5 +437,14 @@ export const deleteUserAccount = async (email: string, password: string): Promis
       handleAuthError(error as AuthError);
     }
     throw error;
+  }
+};
+
+export const resetPassword = async (email: string): Promise<void> => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (error: any) {
+    console.error('Password reset error:', error);
+    throw new Error(error.message);
   }
 }; 

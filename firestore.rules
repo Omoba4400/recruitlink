@@ -23,11 +23,52 @@ service cloud.firestore {
       );
     }
 
+    function isValidUserData(userData) {
+      return userData.size() > 0 
+        && userData.uid is string
+        && userData.email is string
+        && userData.displayName is string
+        && userData.userType in ['athlete', 'coach', 'team', 'sponsor', 'media', 'fan']
+        && userData.createdAt is string
+        && userData.updatedAt is string;
+    }
+
+    function isValidProfileUpdate(userData) {
+      let allowedFields = [
+        'displayName', 'photoURL', 'bio', 'location', 'socialLinks',
+        'updatedAt', 'verified', 'athleteInfo', 'coachInfo', 'teamInfo',
+        'sponsorInfo', 'mediaInfo'
+      ];
+      return userData.diff().affectedKeys().hasOnly(allowedFields);
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isVerified() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.verified == true;
+    }
+
+    function isValidVerificationDoc() {
+      let incoming = request.resource.data;
+      return incoming.size() <= 1000000  // Max 1MB
+        && incoming.type in ['studentId', 'athleteId', 'transcript', 'other']
+        && incoming.fileUrl is string
+        && incoming.fileName is string
+        && incoming.mimeType in ['image/jpeg', 'image/png', 'application/pdf']
+        && incoming.uploadedAt is string;
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update, delete: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() 
+        && request.auth.uid == userId 
+        && isValidUserData(request.resource.data);
+      allow update: if (isOwner(userId) && isValidProfileUpdate(request.resource.data)) 
+        || isAdmin();
+      allow delete: if isAdmin();
       
       // User connections subcollection
       match /connections/{connectionId} {
@@ -105,6 +146,31 @@ service cloud.firestore {
     match /analytics/{docId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
+    }
+
+    // Verification requests
+    match /verifications/{requestId} {
+      allow read: if isSignedIn() && (
+        isOwner(resource.data.userId) || isAdmin()
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == request.auth.uid
+      );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Verification documents
+    match /verification_documents/{docId} {
+      allow read: if isSignedIn() && (
+        isOwner(resource.data.userId) || isAdmin()
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == request.auth.uid &&
+        isValidVerificationDoc()
+      );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
   }
 } 

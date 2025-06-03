@@ -1,4 +1,4 @@
-# Setting up Twitter Authentication for Athlete Connect
+# Setting up Twitter Authentication for SportFwd
 
 ## 1. Create a Twitter Developer Account
 
@@ -11,7 +11,7 @@
 
 1. Go to [Twitter Developer Portal](https://developer.twitter.com/en/portal/projects-and-apps)
 2. Click "Create Project"
-3. Name your project (e.g., "Athlete Connect")
+3. Name your project (e.g., "SportFwd")
 4. Select your use case
 5. Click "Create"
 6. Click "Create App" within your project

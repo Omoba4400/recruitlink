@@ -1,6 +1,6 @@
-# Athlete Connect
+# SportFwd
 
-Athlete Connect is a modern web platform designed to bridge the gap between athletes, coaches, teams, and companies. It provides a professional networking and management solution tailored for the sports industry.
+SportFwd is a modern web platform designed to bridge the gap between athletes, coaches, teams, and companies. It provides a professional networking and management solution tailored for the sports industry, with a focus on college athletics.
 
 ## 🌟 Features
 

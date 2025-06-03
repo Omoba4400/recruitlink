@@ -14,7 +14,8 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { Event, User } from '../types';
+import { Event } from '../types/event';
+import { User } from '../types/user';
 
 export const createEvent = async (eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>): Promise<Event> => {
   try {

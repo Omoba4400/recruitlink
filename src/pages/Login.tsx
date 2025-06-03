@@ -16,8 +16,46 @@ import {
 } from '@mui/material';
 import { Home as HomeIcon } from '@mui/icons-material';
 import { loginUser, resendVerificationEmail } from '../services/auth.service';
-import { setUser, setError } from '../store/slices/authSlice';
+import { setUser, setError as setAuthError } from '../store/slices/authSlice';
 import { useSnackbar } from 'notistack';
+import { User } from '../types/user';
+
+const formatUserData = (firebaseUser: any): User => {
+  return {
+    id: firebaseUser.uid,
+    uid: firebaseUser.uid,
+    email: firebaseUser.email || '',
+    displayName: firebaseUser.displayName || '',
+    photoURL: firebaseUser.photoURL || undefined,
+    userType: 'athlete',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+    bio: '',
+    location: '',
+    verified: false,
+    emailVerified: firebaseUser.emailVerified,
+    isAdmin: false,
+    verificationStatus: 'none',
+    privacySettings: {
+      profileVisibility: 'public',
+      allowMessagesFrom: 'everyone',
+      showEmail: true,
+      showLocation: true,
+      showAcademicInfo: true,
+      showAthleteStats: true
+    },
+    socialLinks: {
+      instagram: '',
+      twitter: '',
+      linkedin: '',
+      youtube: ''
+    },
+    followers: [],
+    following: [],
+    connections: []
+  };
+};
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -48,13 +86,17 @@ const Login: React.FC = () => {
         throw new Error('Please enter a valid email address');
       }
 
-      const result = await loginUser(email, password);
-      dispatch(setUser(result.user));
-
-      if (!result.emailVerified) {
-        setNeedsVerification(true);
+      const user = await loginUser(email, password);
+      
+      if (user) {
+        dispatch(setUser(formatUserData(user)));
+        if (!user.emailVerified) {
+          setNeedsVerification(true);
+        } else {
+          navigate('/home');
+        }
       } else {
-        navigate('/home');
+        throw new Error('Login failed: No user data received');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An error occurred during login';

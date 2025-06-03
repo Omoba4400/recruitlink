@@ -22,7 +22,6 @@ import {
   EmojiEvents,
   BusinessCenter,
 } from '@mui/icons-material';
-import backgroundVideo from '../assets/856132-hd_1920_1080_30fps.mp4';
 
 // Carousel messages for value proposition
 const carouselMessages = [
@@ -37,6 +36,7 @@ const Landing = () => {
   const navigate = useNavigate();
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [videoError, setVideoError] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -46,29 +46,58 @@ const Landing = () => {
   }, []);
 
   return (
-    <Box sx={{ position: 'relative', minHeight: '100vh', overflow: 'hidden' }}>
+    <Box sx={{ 
+      position: 'relative', 
+      minHeight: '100vh', 
+      overflow: 'hidden',
+      bgcolor: 'background.default', // Fallback background color
+    }}>
       {/* Background Video */}
-      <Box
-        component="video"
-        src={backgroundVideo}
-        autoPlay
-        muted
-        loop
-        sx={{
-          position: 'absolute',
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          zIndex: -1,
-          filter: 'brightness(0.4)',
-        }}
-      />
+      {!videoError && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 0,
+            '&::after': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              background: 'rgba(0, 0, 0, 0.6)',
+              zIndex: 1,
+            }
+          }}
+        >
+          <video
+            autoPlay
+            muted
+            loop
+            playsInline
+            onError={() => setVideoError(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              position: 'absolute',
+            }}
+          >
+            <source src="/videos/background.mp4" type="video/mp4" />
+          </video>
+        </Box>
+      )}
 
       {/* Main Content */}
       <Container 
         maxWidth="lg" 
         sx={{ 
-          position: 'relative', 
+          position: 'relative',
+          zIndex: 1, 
           py: { xs: 4, sm: 8 },
           px: { xs: 2, sm: 3 }
         }}
@@ -83,17 +112,31 @@ const Landing = () => {
               fontWeight: 700 
             }}
           >
-            Athlete Connect 
+            SportFwd
+          </Typography>
+          <Typography 
+            variant="h2" 
+            color="white" 
+            sx={{ 
+              mt: 2,
+              fontSize: { xs: '1.75rem', sm: '2.5rem' },
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+            }}
+          >
+            Study Well. Train Hard.™
           </Typography>
           <Typography 
             variant="h4" 
             color="white" 
             sx={{ 
-              mt: 2,
-              fontSize: { xs: '1.5rem', sm: '2.125rem' }
+              mt: 1,
+              fontSize: { xs: '1.25rem', sm: '1.75rem' },
+              opacity: 0.9,
+              fontStyle: 'italic'
             }}
           >
-            Where Talent Meets Opportunity
+            The College Athletes' Advantage.™
           </Typography>
         </Box>
 
@@ -336,7 +379,7 @@ const Landing = () => {
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center', alignItems: 'center', mb: { xs: 3, sm: 2 } }}>
             <Box sx={{ width: { xs: '100%', sm: 'auto' }, textAlign: 'center' }}>
               <Typography variant="body2" color="white" sx={{ opacity: 0.7, fontSize: { xs: '1rem', sm: '0.875rem' }, py: { xs: 1, sm: 0 } }}>
-                About Athlete Connect
+                About SportFwd
               </Typography>
             </Box>
             <Box sx={{ width: { xs: '100%', sm: 'auto' }, textAlign: 'center' }}>

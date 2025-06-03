@@ -12,14 +12,16 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     id: firebaseUser.uid,
     uid: firebaseUser.uid,
     email: firebaseUser.email || '',
-    displayName: firebaseUser.displayName,
-    photoURL: firebaseUser.photoURL,
+    displayName: firebaseUser.displayName || '',
+    photoURL: firebaseUser.photoURL || undefined,
     userType: (userType as User['userType']) || 'athlete',
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
     bio: '',
     location: '',
-    isVerified: false,
+    verified: false,
+    emailVerified: firebaseUser.emailVerified,
     socialLinks: {
       instagram: '',
       twitter: '',
@@ -29,6 +31,15 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     followers: [],
     following: [],
     connections: [],
+    verificationStatus: 'none',
+    privacySettings: {
+      profileVisibility: 'public',
+      allowMessagesFrom: 'everyone',
+      showEmail: true,
+      showLocation: true,
+      showAcademicInfo: true,
+      showAthleteStats: true
+    }
   };
 };
 

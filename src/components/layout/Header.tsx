@@ -149,7 +149,7 @@ const Header = () => {
           component="div"
           sx={{ display: { xs: 'none', sm: 'block' }, ml: 1 }}
         >
-          Athlete Connect
+          SportFwd
         </Typography>
 
         <Search>

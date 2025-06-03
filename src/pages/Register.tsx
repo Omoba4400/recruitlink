@@ -18,11 +18,13 @@ import {
   IconButton,
   useTheme,
   useMediaQuery,
+  Grid,
 } from '@mui/material';
 import { Home as HomeIcon } from '@mui/icons-material';
 import { registerUser } from '../services/auth.service';
+import { createUserProfile } from '../services/user.service';
 import { setUser, setError } from '../store/slices/authSlice';
-import { User } from '../types';
+import { User, UserType, UserProfile } from '../types/user';
 import { useSnackbar } from 'notistack';
 
 interface FormData {
@@ -30,17 +32,126 @@ interface FormData {
   password: string;
   confirmPassword: string;
   displayName: string;
-  userType: User['userType'];
+  userType: UserType;
+  athleteInfo?: {
+    sports: [{
+      sport: string;
+      position: string;
+      level: string;
+      experience: number;
+      specialties: string[];
+      achievements: string[];
+    }];
+    academicInfo: {
+      currentSchool: string;
+      graduationYear: string;
+    };
+    verificationStatus: 'pending' | 'verified' | 'rejected';
+    media: string[];
+    memberships: string[];
+    interests: string[];
+    activities: string[];
+    awards: string[];
+    achievements: string[];
+    eligibility: {
+      isEligible: boolean;
+    };
+    recruitingStatus: 'open' | 'closed' | 'committed';
+  };
+  collegeInfo?: {
+    institutionName: string;
+    division: string;
+  };
+  teamInfo?: {
+    teamName: string;
+    sport: string;
+  };
+  coachInfo?: {
+    specialization: string[];
+    experience: string;
+  };
+  sponsorInfo?: {
+    companyName: string;
+    industry: string;
+  };
+  mediaInfo?: {
+    organization: string;
+    coverageAreas: string[];
+  };
 }
 
-const Register: React.FC = () => {
-  const [formData, setFormData] = useState<FormData>({
-    email: '',
-    password: '',
-    confirmPassword: '',
-    displayName: '',
+const initialFormData: FormData = {
+  email: '',
+  password: '',
+  confirmPassword: '',
+  displayName: '',
+  userType: 'athlete',
+  athleteInfo: {
+    sports: [{
+      sport: '',
+      position: '',
+      level: '',
+      experience: 0,
+      specialties: [],
+      achievements: []
+    }],
+    academicInfo: {
+      currentSchool: '',
+      graduationYear: ''
+    },
+    verificationStatus: 'pending',
+    media: [],
+    memberships: [],
+    interests: [],
+    activities: [],
+    awards: [],
+    achievements: [],
+    eligibility: {
+      isEligible: true
+    },
+    recruitingStatus: 'open'
+  }
+};
+
+const formatUserData = (firebaseUser: any): User => {
+  return {
+    id: firebaseUser.uid,
+    uid: firebaseUser.uid,
+    email: firebaseUser.email || '',
+    displayName: firebaseUser.displayName || '',
+    photoURL: firebaseUser.photoURL || undefined,
     userType: 'athlete',
-  });
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+    bio: '',
+    location: '',
+    verified: false,
+    emailVerified: firebaseUser.emailVerified,
+    isAdmin: false,
+    verificationStatus: 'none',
+    privacySettings: {
+      profileVisibility: 'public',
+      allowMessagesFrom: 'everyone',
+      showEmail: true,
+      showLocation: true,
+      showAcademicInfo: true,
+      showAthleteStats: true
+    },
+    socialLinks: {
+      instagram: '',
+      twitter: '',
+      linkedin: '',
+      youtube: ''
+    },
+    followers: [],
+    following: [],
+    connections: []
+  };
+};
+
+const Register: React.FC = () => {
+  const [formData, setFormData] = useState<FormData>(initialFormData);
   const [loading, setLoading] = useState(false);
   const [error, setLocalError] = useState<string | null>(null);
   const [verificationSent, setVerificationSent] = useState(false);
@@ -58,11 +169,321 @@ const Register: React.FC = () => {
     }));
   };
 
-  const handleSelectChange = (e: SelectChangeEvent<User['userType']>) => {
+  const handleSelectChange = (e: SelectChangeEvent<UserType>) => {
+    const userType = e.target.value as UserType;
     setFormData((prev) => ({
       ...prev,
-      userType: e.target.value as User['userType'],
+      userType,
+      athleteInfo: userType === 'athlete' ? {
+        sports: [{
+          sport: '',
+          position: '',
+          level: '',
+          experience: 0,
+          specialties: [],
+          achievements: []
+        }],
+        academicInfo: {
+          currentSchool: '',
+          graduationYear: ''
+        },
+        verificationStatus: 'pending',
+        media: [],
+        memberships: [],
+        interests: [],
+        activities: [],
+        awards: [],
+        achievements: [],
+        eligibility: {
+          isEligible: true
+        },
+        recruitingStatus: 'open'
+      } : undefined,
+      collegeInfo: userType === 'college' ? {
+        name: '',
+        location: '',
+        conference: '',
+        sports: [],
+        institutionName: '',
+        division: ''
+      } : undefined,
+      teamInfo: userType === 'team' ? {
+        teamName: '',
+        sport: '',
+        canMessageAthletes: false,
+        achievements: [],
+        roster: [],
+        openPositions: []
+      } : undefined,
+      coachInfo: userType === 'coach' ? {
+        specialization: [],
+        experience: '',
+        certifications: [],
+        canMessageAthletes: false,
+        verificationStatus: 'pending'
+      } : undefined,
+      sponsorInfo: userType === 'sponsor' ? {
+        companyName: '',
+        industry: '',
+        canMessageAthletes: false,
+        sponsorshipTypes: [],
+        activeOpportunities: []
+      } : undefined,
+      mediaInfo: userType === 'media' ? {
+        organization: '',
+        canMessageAthletes: false,
+        coverageAreas: [],
+        mediaType: []
+      } : undefined
     }));
+  };
+
+  type InfoType = 'athleteInfo' | 'collegeInfo' | 'teamInfo' | 'coachInfo' | 'sponsorInfo' | 'mediaInfo';
+
+  const updateTypeSpecificField = (
+    type: InfoType,
+    field: string,
+    value: any
+  ) => {
+    setFormData((prev: FormData) => {
+      const newFormData = { ...prev };
+      if (type === 'athleteInfo') {
+        if (!newFormData.athleteInfo) {
+          newFormData.athleteInfo = {
+            sports: [{
+              sport: '',
+              position: '',
+              level: '',
+              experience: 0,
+              specialties: [],
+              achievements: []
+            }],
+            academicInfo: {
+              currentSchool: '',
+              graduationYear: ''
+            },
+            verificationStatus: 'pending',
+            media: [],
+            memberships: [],
+            interests: [],
+            activities: [],
+            awards: [],
+            achievements: [],
+            eligibility: {
+              isEligible: true
+            },
+            recruitingStatus: 'open'
+          };
+        }
+
+        if (field === 'sports') {
+          newFormData.athleteInfo = {
+            ...newFormData.athleteInfo,
+            sports: [value[0]]
+          };
+        } else if (field === 'academicInfo') {
+          newFormData.athleteInfo = {
+            ...newFormData.athleteInfo,
+            academicInfo: value
+          };
+        }
+      } else if (newFormData[type]) {
+        (newFormData[type] as any)[field] = value;
+      }
+      return newFormData;
+    });
+  };
+
+  const getTypeSpecificFields = () => {
+    switch (formData.userType) {
+      case 'athlete':
+        return (
+          <>
+            <TextField
+              required
+              fullWidth
+              name="sport"
+              label="Sport"
+              value={formData.athleteInfo?.sports[0]?.sport || ''}
+              onChange={(e) => {
+                const currentSport = formData.athleteInfo?.sports[0] || {
+                  sport: '',
+                  position: '',
+                  level: '',
+                  experience: 0,
+                  specialties: [],
+                  achievements: []
+                };
+                updateTypeSpecificField('athleteInfo', 'sports', [{
+                  ...currentSport,
+                  sport: e.target.value
+                }]);
+              }}
+              {...inputProps}
+            />
+            <TextField
+              required
+              fullWidth
+              name="position"
+              label="Position"
+              value={formData.athleteInfo?.sports[0]?.position || ''}
+              onChange={(e) => {
+                const currentSport = formData.athleteInfo?.sports[0] || {
+                  sport: '',
+                  position: '',
+                  level: '',
+                  experience: 0,
+                  specialties: [],
+                  achievements: []
+                };
+                updateTypeSpecificField('athleteInfo', 'sports', [{
+                  ...currentSport,
+                  position: e.target.value
+                }]);
+              }}
+              {...inputProps}
+            />
+            <TextField
+              fullWidth
+              name="currentSchool"
+              label="Current School"
+              value={formData.athleteInfo?.academicInfo.currentSchool || ''}
+              onChange={(e) => updateTypeSpecificField('athleteInfo', 'academicInfo', {
+                ...formData.athleteInfo?.academicInfo,
+                currentSchool: e.target.value
+              })}
+              {...inputProps}
+            />
+            <TextField
+              fullWidth
+              name="graduationYear"
+              label="Graduation Year"
+              value={formData.athleteInfo?.academicInfo.graduationYear || ''}
+              onChange={(e) => updateTypeSpecificField('athleteInfo', 'academicInfo', {
+                ...formData.athleteInfo?.academicInfo,
+                graduationYear: e.target.value
+              })}
+              {...inputProps}
+            />
+          </>
+        );
+      case 'college':
+        return (
+          <>
+            <TextField
+              required
+              fullWidth
+              name="institutionName"
+              label="Institution Name"
+              value={formData.collegeInfo?.institutionName || ''}
+              onChange={(e) => updateTypeSpecificField('collegeInfo', 'institutionName', e.target.value)}
+              {...inputProps}
+            />
+            <TextField
+              fullWidth
+              name="division"
+              label="Division"
+              value={formData.collegeInfo?.division || ''}
+              onChange={(e) => updateTypeSpecificField('collegeInfo', 'division', e.target.value)}
+              {...inputProps}
+            />
+          </>
+        );
+      case 'team':
+        return (
+          <>
+            <TextField
+              required
+              fullWidth
+              name="teamName"
+              label="Team Name"
+              value={formData.teamInfo?.teamName || ''}
+              onChange={(e) => updateTypeSpecificField('teamInfo', 'teamName', e.target.value)}
+              {...inputProps}
+            />
+            <TextField
+              required
+              fullWidth
+              name="sport"
+              label="Sport"
+              value={formData.teamInfo?.sport || ''}
+              onChange={(e) => updateTypeSpecificField('teamInfo', 'sport', e.target.value)}
+              {...inputProps}
+            />
+          </>
+        );
+      case 'coach':
+        return (
+          <>
+            <TextField
+              required
+              fullWidth
+              name="specialization"
+              label="Specialization"
+              value={formData.coachInfo?.specialization.join(', ') || ''}
+              onChange={(e) => updateTypeSpecificField('coachInfo', 'specialization', e.target.value.split(',').map(s => s.trim()))}
+              helperText="Separate multiple specializations with commas"
+              {...inputProps}
+            />
+            <TextField
+              fullWidth
+              name="experience"
+              label="Years of Experience"
+              value={formData.coachInfo?.experience || ''}
+              onChange={(e) => updateTypeSpecificField('coachInfo', 'experience', e.target.value)}
+              {...inputProps}
+            />
+          </>
+        );
+      case 'sponsor':
+        return (
+          <>
+            <TextField
+              required
+              fullWidth
+              name="companyName"
+              label="Company Name"
+              value={formData.sponsorInfo?.companyName || ''}
+              onChange={(e) => updateTypeSpecificField('sponsorInfo', 'companyName', e.target.value)}
+              {...inputProps}
+            />
+            <TextField
+              required
+              fullWidth
+              name="industry"
+              label="Industry"
+              value={formData.sponsorInfo?.industry || ''}
+              onChange={(e) => updateTypeSpecificField('sponsorInfo', 'industry', e.target.value)}
+              {...inputProps}
+            />
+          </>
+        );
+      case 'media':
+        return (
+          <>
+            <TextField
+              required
+              fullWidth
+              name="organization"
+              label="Media Organization"
+              value={formData.mediaInfo?.organization || ''}
+              onChange={(e) => updateTypeSpecificField('mediaInfo', 'organization', e.target.value)}
+              {...inputProps}
+            />
+            <TextField
+              fullWidth
+              name="coverageAreas"
+              label="Coverage Areas"
+              value={formData.mediaInfo?.coverageAreas.join(', ') || ''}
+              onChange={(e) => updateTypeSpecificField('mediaInfo', 'coverageAreas', e.target.value.split(',').map(s => s.trim()))}
+              helperText="Separate multiple areas with commas"
+              {...inputProps}
+            />
+          </>
+        );
+      default:
+        return null;
+    }
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -71,35 +492,76 @@ const Register: React.FC = () => {
     setLocalError(null);
 
     try {
-      // Validate passwords match
+      // Validation checks...
       if (formData.password !== formData.confirmPassword) {
         throw new Error('Passwords do not match');
       }
 
-      // Validate required fields
       if (!formData.email || !formData.password || !formData.displayName) {
         throw new Error('Please fill in all required fields');
       }
 
-      // Validate email format
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(formData.email)) {
         throw new Error('Please enter a valid email address');
       }
 
-      // Validate password length
       if (formData.password.length < 6) {
         throw new Error('Password must be at least 6 characters long');
       }
 
-      const result = await registerUser(
+      // Register user
+      const { user, userData } = await registerUser(
         formData.email,
         formData.password,
         formData.displayName,
         formData.userType
       );
 
-      dispatch(setUser(result.user));
+      // Create user profile with additional info
+      await createUserProfile(user.uid, {
+        email: formData.email,
+        displayName: formData.displayName,
+        userType: formData.userType,
+        athleteInfo: formData.athleteInfo,
+        collegeInfo: formData.userType === 'college' ? {
+          name: formData.collegeInfo?.institutionName || '',
+          location: '',
+          conference: formData.collegeInfo?.division || '',
+          sports: [],
+          division: formData.collegeInfo?.division || ''
+        } : undefined,
+        teamInfo: formData.userType === 'team' ? {
+          teamName: formData.teamInfo?.teamName || '',
+          sport: formData.teamInfo?.sport || '',
+          canMessageAthletes: false,
+          achievements: [],
+          roster: [],
+          openPositions: []
+        } : undefined,
+        coachInfo: formData.userType === 'coach' ? {
+          specialization: formData.coachInfo?.specialization || [],
+          experience: formData.coachInfo?.experience || '',
+          certifications: [],
+          canMessageAthletes: false,
+          verificationStatus: 'pending'
+        } : undefined,
+        sponsorInfo: formData.userType === 'sponsor' ? {
+          companyName: formData.sponsorInfo?.companyName || '',
+          industry: formData.sponsorInfo?.industry || '',
+          canMessageAthletes: false,
+          sponsorshipTypes: [],
+          activeOpportunities: []
+        } : undefined,
+        mediaInfo: formData.userType === 'media' ? {
+          organization: formData.mediaInfo?.organization || '',
+          canMessageAthletes: false,
+          coverageAreas: formData.mediaInfo?.coverageAreas || [],
+          mediaType: []
+        } : undefined
+      });
+
+      dispatch(setUser(userData));
       enqueueSnackbar('Registration successful! Please verify your email.', { variant: 'success' });
       setVerificationSent(true);
       navigate('/verify-email');
@@ -248,16 +710,40 @@ const Register: React.FC = () => {
               autoComplete="name"
               value={formData.displayName}
               onChange={handleTextChange}
-              error={!!error && error.includes('name')}
               {...inputProps}
             />
+            <FormControl 
+              fullWidth 
+              sx={{ mb: { xs: 3, sm: 2 } }}
+            >
+              <InputLabel id="user-type-label">I am a...</InputLabel>
+              <Select
+                labelId="user-type-label"
+                id="userType"
+                name="userType"
+                value={formData.userType}
+                label="I am a..."
+                onChange={handleSelectChange}
+              >
+                <MenuItem value="athlete">College Athlete</MenuItem>
+                <MenuItem value="college">College/University</MenuItem>
+                <MenuItem value="team">Team</MenuItem>
+                <MenuItem value="fan">Fan/Follower</MenuItem>
+                <MenuItem value="coach">Coach</MenuItem>
+                <MenuItem value="sponsor">Sponsor</MenuItem>
+                <MenuItem value="media">Media</MenuItem>
+              </Select>
+            </FormControl>
+
+            {/* Type-specific fields */}
+            {getTypeSpecificFields()}
+
             <TextField
               required
               fullWidth
               name="password"
               label="Password"
               type="password"
-              id="password"
               autoComplete="new-password"
               value={formData.password}
               onChange={handleTextChange}
@@ -270,33 +756,12 @@ const Register: React.FC = () => {
               name="confirmPassword"
               label="Confirm Password"
               type="password"
-              id="confirmPassword"
               autoComplete="new-password"
               value={formData.confirmPassword}
               onChange={handleTextChange}
               error={!!error && error.includes('password')}
               {...inputProps}
             />
-            <FormControl 
-              fullWidth 
-              required
-              sx={{ mb: { xs: 3, sm: 2 } }}
-            >
-              <InputLabel id="userType-label">I am a</InputLabel>
-              <Select
-                labelId="userType-label"
-                id="userType"
-                name="userType"
-                value={formData.userType}
-                label="I am a"
-                onChange={handleSelectChange}
-              >
-                <MenuItem value="athlete">Athlete</MenuItem>
-                <MenuItem value="coach">Coach</MenuItem>
-                <MenuItem value="team">Team</MenuItem>
-                <MenuItem value="company">Company</MenuItem>
-              </Select>
-            </FormControl>
 
             <Button
               type="submit"
@@ -306,7 +771,7 @@ const Register: React.FC = () => {
               sx={{
                 mt: 2,
                 mb: 2,
-                height: { xs: '48px', sm: '42px' },
+                py: { xs: 2, sm: 1.5 },
                 fontSize: { xs: '1.1rem', sm: '1rem' }
               }}
             >
@@ -317,8 +782,9 @@ const Register: React.FC = () => {
               <Link 
                 component={RouterLink} 
                 to="/login"
-                variant="body2"
-                sx={{ fontSize: { xs: '1rem', sm: '0.875rem' } }}
+                sx={{
+                  fontSize: { xs: '1rem', sm: '0.875rem' }
+                }}
               >
                 Already have an account? Sign in
               </Link>

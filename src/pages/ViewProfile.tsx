@@ -38,7 +38,7 @@ import {
   Description,
 } from '@mui/icons-material';
 import { RootState } from '../store';
-import { User } from '../types/user';
+import type { User, SocialLinks } from '../types/user';
 import Header from '../components/layout/Header';
 
 interface TabPanelProps {
@@ -81,24 +81,34 @@ const ViewProfile = () => {
           uid: userId || '',
           email: 'athlete@example.com',
           displayName: 'John Doe',
-          photoURL: null,
+          photoURL: undefined,
           userType: 'athlete',
           createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
           lastLogin: new Date().toISOString(),
           bio: 'Professional athlete with 5+ years of experience',
           location: 'New York, USA',
-          isVerified: true,
+          verified: true,
+          verificationStatus: 'none',
+          privacySettings: {
+            profileVisibility: 'public',
+            allowMessagesFrom: 'everyone',
+            showEmail: true,
+            showLocation: true,
+            showAcademicInfo: true,
+            showAthleteStats: true
+          },
           emailVerified: true,
           isAdmin: false,
           socialLinks: {
-            instagram: 'johndoe',
-            twitter: 'johndoe',
-            linkedin: 'johndoe',
-            youtube: 'johndoe',
+            instagram: '',
+            twitter: '',
+            linkedin: '',
+            youtube: ''
           },
           followers: [],
           following: [],
-          connections: [],
+          connections: []
         };
 
         setProfileData(mockUser);
@@ -165,7 +175,7 @@ const ViewProfile = () => {
                 overlap="circular"
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 badgeContent={
-                  profileData.isVerified ? (
+                  profileData.verified ? (
                     <Tooltip title="Verified Profile">
                       <Verified color="primary" />
                     </Tooltip>
@@ -274,7 +284,7 @@ const ViewProfile = () => {
               <Paper sx={{ p: 3 }}>
                 <Typography variant="h6" gutterBottom>Social Links</Typography>
                 <List>
-                  {Object.entries(profileData.socialLinks).map(([platform, url]) => (
+                  {profileData.socialLinks && Object.entries(profileData.socialLinks).map(([platform, url]) => (
                     url && (
                       <ListItem key={platform}>
                         <ListItemIcon>
@@ -284,7 +294,7 @@ const ViewProfile = () => {
                           {platform === 'youtube' && <YouTube />}
                         </ListItemIcon>
                         <ListItemText>
-                          <a href={url} target="_blank" rel="noopener noreferrer">
+                          <a href={url.toString()} target="_blank" rel="noopener noreferrer">
                             {platform.charAt(0).toUpperCase() + platform.slice(1)}
                           </a>
                         </ListItemText>

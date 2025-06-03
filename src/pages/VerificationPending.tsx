@@ -1,10 +1,76 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, Button, CircularProgress, Container, Paper } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { checkEmailVerification, resendVerificationEmail, logoutUser } from '../services/auth.service';
-import { updateEmailVerification } from '../store/slices/authSlice';
+import { setUser, updateEmailVerification } from '../store/slices/authSlice';
 import { useSnackbar } from 'notistack';
+import { RootState } from '../store';
+import { auth, db } from '../config/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { User } from '../types/user';
+
+const getRoleBasedRedirectPath = (userType: string): string => {
+  switch (userType) {
+    case 'athlete':
+      return '/home';
+    case 'coach':
+      return '/home';
+    case 'team':
+      return '/profile'; // Teams should complete their profile first
+    case 'sponsor':
+      return '/sponsorships';
+    case 'media':
+      return '/home';
+    case 'admin':
+      return '/admin/dashboard';
+    default:
+      return '/home';
+  }
+};
+
+const formatUserData = async (firebaseUser: typeof auth.currentUser): Promise<User> => {
+  if (!firebaseUser) throw new Error('No user found');
+  
+  // Get user data from Firestore
+  const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+  const userData = userDoc.exists() ? userDoc.data() as User : null;
+  
+  return {
+    id: firebaseUser.uid,
+    uid: firebaseUser.uid,
+    email: firebaseUser.email || '',
+    displayName: firebaseUser.displayName || '',
+    photoURL: userData?.photoURL || firebaseUser.photoURL || undefined,
+    userType: userData?.userType || 'athlete',
+    createdAt: userData?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+    bio: userData?.bio || '',
+    location: userData?.location || '',
+    verified: userData?.verified || false,
+    emailVerified: firebaseUser.emailVerified,
+    isAdmin: userData?.isAdmin || false,
+    verificationStatus: userData?.verificationStatus || 'none',
+    privacySettings: userData?.privacySettings || {
+      profileVisibility: 'public',
+      allowMessagesFrom: 'everyone',
+      showEmail: true,
+      showLocation: true,
+      showAcademicInfo: true,
+      showAthleteStats: true
+    },
+    socialLinks: userData?.socialLinks || {
+      instagram: '',
+      twitter: '',
+      linkedin: '',
+      youtube: ''
+    },
+    followers: userData?.followers || [],
+    following: userData?.following || [],
+    connections: userData?.connections || []
+  };
+};
 
 const VerificationPending: React.FC = () => {
   const navigate = useNavigate();
@@ -13,31 +79,67 @@ const VerificationPending: React.FC = () => {
   const [isChecking, setIsChecking] = useState(false);
   const [resendDisabled, setResendDisabled] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [isVerified, setIsVerified] = useState(false);
+  const currentUser = useSelector((state: RootState) => state.auth.user);
 
-  // Auto-check verification status every 5 seconds
+  // Check if user is already verified on mount
   useEffect(() => {
+    const checkInitialVerification = async () => {
+      if (!auth.currentUser) {
+        navigate('/login');
+        return;
+      }
+
+      // If user is already verified, redirect immediately
+      if (auth.currentUser.emailVerified) {
+        const userData = await formatUserData(auth.currentUser);
+        dispatch(setUser(userData));
+        dispatch(updateEmailVerification(true));
+        const redirectPath = getRoleBasedRedirectPath(userData.userType);
+        navigate(redirectPath);
+        return;
+      }
+    };
+
+    checkInitialVerification();
+  }, [dispatch, navigate]);
+
+  // Auto-check verification status every 5 seconds only if not verified
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
     const checkVerification = async () => {
       try {
-        const isVerified = await checkEmailVerification();
-        if (isVerified) {
+        if (isVerified || !auth.currentUser) return;
+        
+        const verified = await checkEmailVerification();
+        if (verified && auth.currentUser) {
+          setIsVerified(true);
+          const userData = await formatUserData(auth.currentUser);
+          dispatch(setUser(userData));
           dispatch(updateEmailVerification(true));
           enqueueSnackbar('Email verified successfully!', { variant: 'success' });
-          navigate('/home');
+          clearInterval(interval);
+          
+          const redirectPath = getRoleBasedRedirectPath(userData.userType);
+          navigate(redirectPath);
         }
       } catch (error) {
         console.error('Error checking verification status:', error);
       }
     };
 
-    // Check immediately on mount
-    checkVerification();
+    // Only start interval if user is not verified
+    if (!isVerified && auth.currentUser && !auth.currentUser.emailVerified) {
+      interval = setInterval(checkVerification, 5000);
+    }
 
-    // Set up interval for periodic checks
-    const interval = setInterval(checkVerification, 5000);
-
-    // Cleanup interval on unmount
-    return () => clearInterval(interval);
-  }, [navigate, dispatch, enqueueSnackbar]);
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [navigate, dispatch, enqueueSnackbar, isVerified]);
 
   // Countdown timer for resend button
   useEffect(() => {
@@ -53,18 +155,26 @@ const VerificationPending: React.FC = () => {
   }, [countdown]);
 
   const handleManualCheck = async () => {
+    if (isVerified || !auth.currentUser) return;
+    
     setIsChecking(true);
     try {
-      const isVerified = await checkEmailVerification();
-      if (isVerified) {
+      const verified = await checkEmailVerification();
+      if (verified && auth.currentUser) {
+        setIsVerified(true);
+        const userData = await formatUserData(auth.currentUser);
+        dispatch(setUser(userData));
         dispatch(updateEmailVerification(true));
         enqueueSnackbar('Email verified successfully!', { variant: 'success' });
-        navigate('/home');
+        
+        const redirectPath = getRoleBasedRedirectPath(userData.userType);
+        navigate(redirectPath);
       } else {
         enqueueSnackbar('Email not verified yet. Please check your inbox and click the verification link.', { variant: 'info' });
       }
-    } catch (error: any) {
-      enqueueSnackbar(error.message || 'Failed to check verification status', { variant: 'error' });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to check verification status';
+      enqueueSnackbar(errorMessage, { variant: 'error' });
     } finally {
       setIsChecking(false);
     }
@@ -74,10 +184,11 @@ const VerificationPending: React.FC = () => {
     try {
       await resendVerificationEmail();
       setResendDisabled(true);
-      setCountdown(60); // Disable resend for 60 seconds
+      setCountdown(60);
       enqueueSnackbar('Verification email sent! Please check your inbox.', { variant: 'success' });
-    } catch (error: any) {
-      enqueueSnackbar(error.message || 'Failed to resend verification email', { variant: 'error' });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to resend verification email';
+      enqueueSnackbar(errorMessage, { variant: 'error' });
     }
   };
 
@@ -85,10 +196,16 @@ const VerificationPending: React.FC = () => {
     try {
       await logoutUser();
       navigate('/login');
-    } catch (error: any) {
-      enqueueSnackbar(error.message || 'Failed to log out', { variant: 'error' });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to log out';
+      enqueueSnackbar(errorMessage, { variant: 'error' });
     }
   };
+
+  // If user is already verified, don't render anything
+  if (!auth.currentUser || auth.currentUser.emailVerified) {
+    return null;
+  }
 
   return (
     <Container maxWidth="sm">
@@ -111,7 +228,7 @@ const VerificationPending: React.FC = () => {
               variant="contained"
               color="primary"
               onClick={handleManualCheck}
-              disabled={isChecking}
+              disabled={isChecking || isVerified}
               sx={{ mr: 2 }}
             >
               {isChecking ? (
@@ -124,7 +241,7 @@ const VerificationPending: React.FC = () => {
             <Button
               variant="outlined"
               onClick={handleResendEmail}
-              disabled={resendDisabled}
+              disabled={resendDisabled || isVerified}
             >
               {resendDisabled 
                 ? `Resend Email (${countdown}s)` 

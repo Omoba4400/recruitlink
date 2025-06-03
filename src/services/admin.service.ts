@@ -70,7 +70,7 @@ export const getUsers = async (
 
 export const updateUserStatus = async (
   userId: string,
-  updates: Partial<Pick<User, 'isVerified' | 'isAdmin'>>
+  updates: Partial<Pick<User, 'verified' | 'isAdmin'>>
 ) => {
   try {
     const userRef = doc(db, 'users', userId);
