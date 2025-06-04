@@ -4,8 +4,8 @@ service firebase.storage {
   match /b/{bucket}/o {
     // Default rule - block all access
     match /{allPaths=**} {
-      allow read: if false;
-      allow write: if false;
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
     }
     
     // User-specific storage rules
@@ -13,8 +13,7 @@ service firebase.storage {
       allow read: if request.auth != null;
       allow create: if request.auth != null 
         && request.auth.uid == userId
-        && request.resource.size < 5 * 1024 * 1024 // 5MB
-        && request.resource.contentType.matches('image/.*');
+        && request.resource.size < 5 * 1024 * 1024; // 5MB
       allow update: if request.auth != null 
         && request.auth.uid == userId;
       allow delete: if request.auth != null 
@@ -23,8 +22,8 @@ service firebase.storage {
     
     // Public assets if needed
     match /public/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if false;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
   }
 } 

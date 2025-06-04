@@ -21,19 +21,17 @@ import {
   Avatar,
   IconButton,
   Tooltip,
-  Link,
 } from '@mui/material';
 import {
   CheckCircle as ApproveIcon,
   Cancel as RejectIcon,
   Visibility as ViewIcon,
-  Verified,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../config/firebase';
+import { collection, query, where, getDocs, doc, updateDoc, orderBy } from 'firebase/firestore';
+import { db, auth } from '../../config/firebase';
 import { UserProfile } from '../../types/user';
-import Header from '../../components/layout/Header';
+import { useAdminAuth } from '../../contexts/AdminAuthContext';
 
 interface VerificationRequest extends UserProfile {
   verificationDocuments: {
@@ -45,47 +43,165 @@ interface VerificationRequest extends UserProfile {
 }
 
 const VerificationDashboard: React.FC = () => {
+  const { isAdmin, loading: authLoading } = useAdminAuth();
   const [requests, setRequests] = useState<VerificationRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<VerificationRequest | null>(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [processingAction, setProcessingAction] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
 
   useEffect(() => {
-    fetchVerificationRequests();
-  }, []);
+    console.log('VerificationDashboard - Auth state:', {
+      isAdmin,
+      authLoading,
+      currentPath: window.location.pathname
+    });
+  }, [isAdmin, authLoading]);
 
   const fetchVerificationRequests = async () => {
     try {
-      setLoading(true);
-      console.log('Fetching verification requests...');
-      const q = query(
-        collection(db, 'users'),
-        where('verificationStatus', '==', 'pending')
-      );
-      const querySnapshot = await getDocs(q);
-      console.log('Query snapshot size:', querySnapshot.size);
-      const requestsData: VerificationRequest[] = [];
-      
-      querySnapshot.forEach((doc) => {
-        console.log('Document data:', doc.id, doc.data());
-        requestsData.push({
-          ...doc.data(),
-          uid: doc.id
-        } as VerificationRequest);
+      setIsLoading(true);
+      console.log('Starting verification requests fetch:', {
+        isAdmin,
+        authLoading
       });
+      
+      if (!isAdmin) {
+        console.log('Fetch aborted: Not admin');
+        throw new Error('Unauthorized: Admin access required');
+      }
 
-      console.log('Final requests data:', requestsData);
+      // Fetch verification requests
+      const verificationQuery = query(
+        collection(db, 'verifications'),
+        where('status', '==', 'pending'),
+        orderBy('createdAt', 'desc')
+      );
+      
+      console.log('Executing verification query...');
+      const verificationSnapshot = await getDocs(verificationQuery);
+      console.log('Verification query results:', {
+        size: verificationSnapshot.size,
+        empty: verificationSnapshot.empty
+      });
+      
+      if (verificationSnapshot.empty) {
+        console.log('No pending verification requests found');
+        setRequests([]);
+        setFetchError(null);
+        return;
+      }
+
+      // Get all unique user IDs from verification requests
+      const userIds = Array.from(new Set(
+        verificationSnapshot.docs
+          .map(doc => doc.data().userId)
+          .filter(id => id !== undefined)
+      ));
+
+      console.log('Found user IDs:', userIds);
+
+      if (userIds.length === 0) {
+        console.log('No valid user IDs found in verification requests');
+        setRequests([]);
+        setFetchError(null);
+        return;
+      }
+
+      // Fetch all user data in one query
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('uid', 'in', userIds)
+      );
+      
+      console.log('Fetching user data...');
+      const usersSnapshot = await getDocs(usersQuery);
+      console.log('Users query results:', {
+        size: usersSnapshot.size,
+        empty: usersSnapshot.empty
+      });
+      
+      // Create a map of user data for quick lookup
+      const userDataMap = new Map(
+        usersSnapshot.docs.map(doc => [doc.data().uid, doc.data()])
+      );
+
+      // Combine verification and user data
+      const requestsData: VerificationRequest[] = verificationSnapshot.docs
+        .map(doc => {
+          const verificationData = doc.data();
+          if (!verificationData.userId) {
+            console.log('Verification request missing userId:', doc.id);
+            return null;
+          }
+          
+          const userData = userDataMap.get(verificationData.userId);
+          if (!userData) {
+            console.log('User data not found for userId:', verificationData.userId);
+            return null;
+          }
+
+          return {
+            ...userData,
+            verificationDocuments: verificationData.documents || {},
+            verificationInfo: verificationData.info,
+            verificationId: doc.id,
+            uid: userData.uid,
+            createdAt: verificationData.createdAt || userData.createdAt
+          } as VerificationRequest;
+        })
+        .filter((request): request is VerificationRequest => request !== null);
+
+      console.log('Final processed requests:', {
+        count: requestsData.length,
+        requests: requestsData
+      });
+      
       setRequests(requestsData);
+      setFetchError(null);
     } catch (error) {
       console.error('Error fetching verification requests:', error);
-      setError('Failed to load verification requests');
+      setFetchError(error instanceof Error ? error.message : 'Failed to load verification requests');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Only fetch data when auth is initialized and we are admin
+    if (!authLoading && isAdmin) {
+      fetchVerificationRequests();
+    }
+  }, [authLoading, isAdmin]);
+
+  // Show loading state while auth is initializing
+  if (authLoading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '400px',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  // Show message if not admin
+  if (!isAdmin) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="warning">
+          You do not have permission to access this page
+        </Alert>
+      </Box>
+    );
+  }
 
   const handleViewRequest = (request: VerificationRequest) => {
     setSelectedRequest(request);
@@ -95,12 +211,28 @@ const VerificationDashboard: React.FC = () => {
   const handleApprove = async (request: VerificationRequest) => {
     try {
       setProcessingAction(true);
+      // Update user verification status
       const userRef = doc(db, 'users', request.uid);
       await updateDoc(userRef, {
-        verificationStatus: 'approved',
         verified: true,
         updatedAt: new Date().toISOString(),
       });
+
+      // Update verification request status
+      const verificationQuery = query(
+        collection(db, 'verifications'),
+        where('userId', '==', request.uid),
+        where('status', '==', 'pending')
+      );
+      const verificationDocs = await getDocs(verificationQuery);
+      
+      if (!verificationDocs.empty) {
+        await updateDoc(doc(db, 'verifications', verificationDocs.docs[0].id), {
+          status: 'approved',
+          updatedAt: new Date().toISOString(),
+          reviewedBy: auth.currentUser?.uid
+        });
+      }
 
       // Update local state
       setRequests(prev => prev.filter(r => r.uid !== request.uid));
@@ -117,12 +249,28 @@ const VerificationDashboard: React.FC = () => {
   const handleReject = async (request: VerificationRequest) => {
     try {
       setProcessingAction(true);
+      // Update user verification status
       const userRef = doc(db, 'users', request.uid);
       await updateDoc(userRef, {
-        verificationStatus: 'rejected',
         verified: false,
         updatedAt: new Date().toISOString(),
       });
+
+      // Update verification request status
+      const verificationQuery = query(
+        collection(db, 'verifications'),
+        where('userId', '==', request.uid),
+        where('status', '==', 'pending')
+      );
+      const verificationDocs = await getDocs(verificationQuery);
+      
+      if (!verificationDocs.empty) {
+        await updateDoc(doc(db, 'verifications', verificationDocs.docs[0].id), {
+          status: 'rejected',
+          updatedAt: new Date().toISOString(),
+          reviewedBy: auth.currentUser?.uid
+        });
+      }
 
       // Update local state
       setRequests(prev => prev.filter(r => r.uid !== request.uid));
@@ -222,14 +370,14 @@ const VerificationDashboard: React.FC = () => {
     );
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <Box
         sx={{
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          minHeight: '100vh',
+          minHeight: '400px',
         }}
       >
         <CircularProgress />
@@ -238,96 +386,93 @@ const VerificationDashboard: React.FC = () => {
   }
 
   return (
-    <Box>
-      <Header />
-      <Container maxWidth="lg" sx={{ mt: 10, mb: 4 }}>
-        <Paper sx={{ p: 4 }}>
-          <Typography variant="h4" gutterBottom>
-            Verification Requests
-          </Typography>
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h4" gutterBottom>
+        Verification Requests
+      </Typography>
 
-          {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
-          )}
+      {fetchError && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {fetchError}
+        </Alert>
+      )}
 
-          <TableContainer>
-            <Table>
-              <TableHead>
+      <Paper sx={{ width: '100%', overflow: 'hidden' }}>
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>User</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Email</TableCell>
+                <TableCell>Submitted</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {requests.length === 0 ? (
                 <TableRow>
-                  <TableCell>User</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Email</TableCell>
-                  <TableCell>Submitted</TableCell>
-                  <TableCell align="right">Actions</TableCell>
+                  <TableCell colSpan={5} align="center">
+                    <Typography color="textSecondary">
+                      No pending verification requests
+                    </Typography>
+                  </TableCell>
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {requests.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center">
-                      <Typography color="textSecondary">
-                        No pending verification requests
-                      </Typography>
+              ) : (
+                requests.map((request) => (
+                  <TableRow key={request.uid}>
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Avatar src={request.photoURL || undefined}>
+                          {request.displayName?.[0]}
+                        </Avatar>
+                        <Typography>{request.displayName}</Typography>
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={request.userType}
+                        size="small"
+                        color="primary"
+                      />
+                    </TableCell>
+                    <TableCell>{request.email}</TableCell>
+                    <TableCell>
+                      {new Date(request.updatedAt).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell align="right">
+                      <Tooltip title="View Details">
+                        <IconButton
+                          onClick={() => handleViewRequest(request)}
+                          color="primary"
+                        >
+                          <ViewIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Reject">
+                        <IconButton
+                          onClick={() => handleReject(request)}
+                          color="error"
+                        >
+                          <RejectIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Approve">
+                        <IconButton
+                          onClick={() => handleApprove(request)}
+                          color="success"
+                        >
+                          <ApproveIcon />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  requests.map((request) => (
-                    <TableRow key={request.uid}>
-                      <TableCell>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <Avatar src={request.photoURL || undefined}>
-                            {request.displayName?.[0]}
-                          </Avatar>
-                          <Typography>{request.displayName}</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={request.userType}
-                          size="small"
-                          color="primary"
-                        />
-                      </TableCell>
-                      <TableCell>{request.email}</TableCell>
-                      <TableCell>
-                        {new Date(request.updatedAt).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Tooltip title="View Details">
-                          <IconButton
-                            onClick={() => handleViewRequest(request)}
-                            color="primary"
-                          >
-                            <ViewIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Reject">
-                          <IconButton
-                            onClick={() => handleReject(request)}
-                            color="error"
-                          >
-                            <RejectIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Approve">
-                          <IconButton
-                            onClick={() => handleApprove(request)}
-                            color="success"
-                          >
-                            <ApproveIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      </Container>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
 
       {renderVerificationDialog()}
     </Box>

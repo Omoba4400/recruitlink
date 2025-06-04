@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 
 interface FirebaseConfig {
@@ -31,7 +30,6 @@ const validateConfig = () => {
     'apiKey',
     'authDomain',
     'projectId',
-    'storageBucket',
     'messagingSenderId',
     'appId'
   ] as const;
@@ -50,7 +48,6 @@ const validateConfig = () => {
     hasApiKey: !!firebaseConfig.apiKey,
     authDomain: firebaseConfig.authDomain,
     projectId: firebaseConfig.projectId,
-    storageBucket: firebaseConfig.storageBucket,
     hasMessagingSenderId: !!firebaseConfig.messagingSenderId,
     hasAppId: !!firebaseConfig.appId,
     hasMeasurementId: !!firebaseConfig.measurementId
@@ -65,7 +62,6 @@ const initializeFirebase = () => {
     const app = initializeApp(firebaseConfig as any);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    const storage = getStorage(app);
 
     // Initialize Analytics if supported
     const initAnalytics = async () => {
@@ -84,14 +80,14 @@ const initializeFirebase = () => {
     // Initialize analytics in the background
     initAnalytics();
 
-    return { app, auth, db, storage };
+    return { app, auth, db };
   } catch (error) {
     console.error('Error initializing Firebase:', error);
     throw error;
   }
 };
 
-const { app, auth, db, storage } = initializeFirebase();
+const { app, auth, db } = initializeFirebase();
 
-export { auth, db, storage };
+export { auth, db };
 export default app; 

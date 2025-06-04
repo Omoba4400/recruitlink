@@ -10,61 +10,51 @@ import {
   Container,
 } from '@mui/material';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../../config/firebase';
 
 const AdminLogin: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { login, isAdmin } = useAdminAuth();
 
   useEffect(() => {
-    console.log('AdminLogin - Current isAdmin state:', isAdmin);
-    console.log('AdminLogin - Current pathname:', location.pathname);
-  }, [isAdmin, location.pathname]);
+    if (isAdmin) {
+      navigate('/admin/dashboard', { replace: true });
+    }
+  }, [isAdmin, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    console.log('Login attempt with:', { email, password });
+    setLoading(true);
 
     try {
-      // Simple hardcoded check
-      if (email === 'admin@athleteconnect.com' && password === 'athleteconnect') {
-        console.log('Credentials matched, calling login()');
-        
-        // Call login and wait for it to complete
-        login();
-        
-        // Add a small delay to ensure storage is set
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Check if login was successful
-        const isAdminSet = localStorage.getItem('isAdmin') === 'true' && 
-                          sessionStorage.getItem('isAdmin') === 'true';
-        
-        console.log('Login state after attempt:', {
-          localStorage: localStorage.getItem('isAdmin'),
-          sessionStorage: sessionStorage.getItem('isAdmin'),
-          contextIsAdmin: isAdmin,
-          isAdminSet
-        });
+      // First authenticate with Firebase
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      if (!userCredential.user) {
+        throw new Error('Authentication failed');
+      }
 
-        if (isAdminSet) {
-          console.log('Login successful, navigating to dashboard');
-          navigate('/admin/dashboard', { replace: true });
-        } else {
-          console.error('Login failed: Storage not set properly');
-          setError('Login failed. Please try again.');
-        }
-      } else {
-        console.log('Invalid credentials');
-        setError('Invalid admin credentials');
+      // Then try to establish admin session
+      try {
+        await login();
+        navigate('/admin/dashboard', { replace: true });
+      } catch (adminError) {
+        // If admin login fails, sign out from Firebase
+        await auth.signOut();
+        setError('You do not have admin privileges');
       }
     } catch (err) {
       console.error('Error during login:', err);
-      setError('An error occurred during login. Please try again.');
+      setError('Invalid email or password');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -105,6 +95,7 @@ const AdminLogin: React.FC = () => {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
+              disabled={loading}
             />
 
             <TextField
@@ -116,6 +107,7 @@ const AdminLogin: React.FC = () => {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
+              disabled={loading}
             />
 
             <Button
@@ -125,8 +117,9 @@ const AdminLogin: React.FC = () => {
               fullWidth
               size="large"
               sx={{ mt: 3 }}
+              disabled={loading}
             >
-              Login
+              {loading ? 'Logging in...' : 'Login'}
             </Button>
           </form>
         </Paper>

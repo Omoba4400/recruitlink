@@ -25,8 +25,7 @@ import {
   where, 
   getDocs 
 } from 'firebase/firestore';
-import { ref, deleteObject, listAll } from 'firebase/storage';
-import { auth, db, storage } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 import { User, UserType } from '../types/user';
 
 const handleAuthError = (error: AuthError): never => {
@@ -411,27 +410,44 @@ export const deleteUserAccount = async (email: string, password: string): Promis
       throw new Error('Please sign in to delete your account.');
     }
 
+    // First, re-authenticate the user
     try {
-      // First, try to re-authenticate the user
       await reauthenticateUser(email, password);
-
-      // Delete Firestore data first
-      await deleteDoc(doc(db, 'users', user.uid));
-      console.log('Firestore user data deleted');
-
-      // Then delete the auth account
-      await user.delete();
-      console.log('Auth account deleted');
     } catch (error: any) {
-      if (error.code === 'auth/requires-recent-login') {
-        throw new Error('Please sign out and sign in again before deleting your account.');
-      }
       if (error.code === 'auth/wrong-password') {
         throw new Error('Incorrect password. Please try again.');
       }
       throw error;
     }
-  } catch (error: any) {
+
+    // Get user data before deletion
+    const userRef = doc(db, 'users', user.uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      console.warn('User document not found in Firestore');
+    }
+
+    // Delete user's data in this order:
+    
+    // 1. Delete verification requests
+    const verificationQuery = query(
+      collection(db, 'verifications'),
+      where('userId', '==', user.uid)
+    );
+    const verificationDocs = await getDocs(verificationQuery);
+    for (const doc of verificationDocs.docs) {
+      await deleteDoc(doc.ref);
+    }
+
+    // 2. Delete user document from Firestore
+    await deleteDoc(userRef);
+
+    // 3. Finally, delete the auth account
+    await deleteUser(user);
+
+    console.log('Account successfully deleted');
+  } catch (error) {
     console.error('Error deleting account:', error);
     if (error instanceof Error && 'code' in error) {
       handleAuthError(error as AuthError);

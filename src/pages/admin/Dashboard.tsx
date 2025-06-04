@@ -9,6 +9,7 @@ import {
   CardContent,
   IconButton,
   useTheme,
+  Alert,
 } from '@mui/material';
 import {
   People as UsersIcon,
@@ -16,6 +17,7 @@ import {
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { getAdminStats } from '../../services/admin.service';
+import { useAdminAuth } from '../../contexts/AdminAuthContext';
 
 interface DashboardCard {
   title: string;
@@ -25,6 +27,7 @@ interface DashboardCard {
 }
 
 const Dashboard: React.FC = () => {
+  const { isAdmin, loading: authLoading } = useAdminAuth();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +40,7 @@ const Dashboard: React.FC = () => {
       setStats(data);
       setError(null);
     } catch (error) {
-      setError('Failed to fetch dashboard statistics');
+      setError(error instanceof Error ? error.message : 'Failed to fetch dashboard statistics');
       console.error('Error fetching stats:', error);
     } finally {
       setLoading(false);
@@ -45,8 +48,38 @@ const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchStats();
-  }, []);
+    // Only fetch stats when auth is initialized and we are admin
+    if (!authLoading && isAdmin) {
+      fetchStats();
+    }
+  }, [authLoading, isAdmin]);
+
+  // Show loading state while auth is initializing
+  if (authLoading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '400px',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  // Show message if not admin
+  if (!isAdmin) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="warning">
+          You do not have permission to access this page
+        </Alert>
+      </Box>
+    );
+  }
 
   if (loading) {
     return (
@@ -66,10 +99,15 @@ const Dashboard: React.FC = () => {
   if (error) {
     return (
       <Box sx={{ p: 3 }}>
-        <Typography color="error">{error}</Typography>
-        <IconButton onClick={fetchStats} color="primary">
-          <RefreshIcon />
-        </IconButton>
+        <Alert severity="error" 
+          action={
+            <IconButton onClick={fetchStats} color="inherit" size="small">
+              <RefreshIcon />
+            </IconButton>
+          }
+        >
+          {error}
+        </Alert>
       </Box>
     );
   }
@@ -87,10 +125,22 @@ const Dashboard: React.FC = () => {
       icon: <ReportsIcon fontSize="large" />,
       color: theme.palette.warning.main,
     },
+    {
+      title: 'Pending Verifications',
+      value: stats?.pendingVerifications || 0,
+      icon: <UsersIcon fontSize="large" />,
+      color: theme.palette.info.main,
+    },
+    {
+      title: 'Active Events',
+      value: stats?.activeEvents || 0,
+      icon: <ReportsIcon fontSize="large" />,
+      color: theme.palette.success.main,
+    },
   ];
 
   return (
-    <Box>
+    <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" gutterBottom>
           Dashboard Overview
@@ -102,7 +152,7 @@ const Dashboard: React.FC = () => {
 
       <Grid container spacing={3}>
         {dashboardCards.map((card, index) => (
-          <Grid item xs={12} sm={6} md={4} key={index}>
+          <Grid item xs={12} sm={6} md={3} key={index}>
             <Card>
               <CardContent>
                 <Box
@@ -142,8 +192,6 @@ const Dashboard: React.FC = () => {
           </Grid>
         ))}
       </Grid>
-
-      {/* Add more sections like recent activities, charts, etc. */}
     </Box>
   );
 };

@@ -13,34 +13,28 @@ import {
   ListItemIcon,
   ListItemText,
   useTheme,
+  useMediaQuery,
   Container,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
   Dashboard,
   Flag,
-  Analytics,
+  VerifiedUser,
   Message,
-  Feedback,
+  People,
   Settings,
+  ChevronLeft,
   ExitToApp,
 } from '@mui/icons-material';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
 
 const drawerWidth = 240;
 
-const menuItems = [
-  { text: 'Dashboard', icon: <Dashboard />, path: '/admin/dashboard' },
-  { text: 'Reports', icon: <Flag />, path: '/admin/reports' },
-  { text: 'Analytics', icon: <Analytics />, path: '/admin/analytics' },
-  { text: 'Messages', icon: <Message />, path: '/admin/messages' },
-  { text: 'Feedback', icon: <Feedback />, path: '/admin/feedback' },
-  { text: 'Settings', icon: <Settings />, path: '/admin/settings' },
-];
-
 const AdminLayout: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   const location = useLocation();
   const { logout } = useAdminAuth();
@@ -49,17 +43,40 @@ const AdminLayout: React.FC = () => {
     setMobileOpen(!mobileOpen);
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/admin/login');
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/admin/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
+
+  const handleNavigation = (path: string) => {
+    navigate(`/admin/${path}`);
+    if (isMobile) setMobileOpen(false);
+  };
+
+  const menuItems = [
+    { text: 'Dashboard', icon: <Dashboard />, path: 'dashboard' },
+    { text: 'Users', icon: <People />, path: 'users' },
+    { text: 'Verification Requests', icon: <VerifiedUser />, path: 'verification-requests' },
+    { text: 'Reports', icon: <Flag />, path: 'reports' },
+    { text: 'Messages', icon: <Message />, path: 'messages' },
+    { text: 'Settings', icon: <Settings />, path: 'settings' },
+  ];
 
   const drawer = (
     <Box sx={{ bgcolor: theme.palette.mode === 'dark' ? '#1A2027' : '#fff', height: '100%' }}>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div">
+        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
           Admin Panel
         </Typography>
+        {isMobile && (
+          <IconButton onClick={handleDrawerToggle}>
+            <ChevronLeft />
+          </IconButton>
+        )}
       </Toolbar>
       <Divider />
       <List>
@@ -67,8 +84,8 @@ const AdminLayout: React.FC = () => {
           <ListItem
             button
             key={item.text}
-            onClick={() => navigate(item.path)}
-            selected={location.pathname === item.path}
+            onClick={() => handleNavigation(item.path)}
+            selected={location.pathname === `/admin/${item.path}`}
           >
             <ListItemIcon>{item.icon}</ListItemIcon>
             <ListItemText primary={item.text} />
@@ -118,12 +135,13 @@ const AdminLayout: React.FC = () => {
         component="nav"
         sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
       >
+        {/* Mobile drawer */}
         <Drawer
           variant="temporary"
           open={mobileOpen}
           onClose={handleDrawerToggle}
           ModalProps={{
-            keepMounted: true, // Better open performance on mobile.
+            keepMounted: true, // Better open performance on mobile
           }}
           sx={{
             display: { xs: 'block', sm: 'none' },
@@ -132,6 +150,7 @@ const AdminLayout: React.FC = () => {
         >
           {drawer}
         </Drawer>
+        {/* Desktop drawer */}
         <Drawer
           variant="permanent"
           sx={{

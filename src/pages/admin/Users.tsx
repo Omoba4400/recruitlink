@@ -6,19 +6,19 @@ import {
   Container,
 } from '@mui/material';
 
-const Reports: React.FC = () => {
+const Users: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        Reports
+        User Management
       </Typography>
       <Paper sx={{ p: 3 }}>
         <Typography>
-          Report management and analytics will be implemented here.
+          User management functionality will be implemented here.
         </Typography>
       </Paper>
     </Box>
   );
 };
 
-export default Reports; 
+export default Users; 

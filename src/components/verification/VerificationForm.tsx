@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import { CloudUpload, Send } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { uploadToCloudinary } from '../../config/cloudinary';
 import Header from '../layout/Header';
@@ -100,16 +100,38 @@ const VerificationForm: React.FC = () => {
     setError(null);
 
     try {
-      // Update user's verification status and documents in Firestore
+      // Create verification document
+      const verificationData = {
+        userId: user.uid,
+        status: 'pending',
+        documents: documentUrls,
+        info: additionalInfo.trim(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userDetails: {
+          displayName: user.displayName,
+          email: user.email,
+          photoURL: user.photoURL,
+          userType: user.userType,
+          location: user.location,
+          bio: user.bio
+        }
+      };
+
+      // Add to verifications collection
+      await addDoc(collection(db, 'verifications'), verificationData);
+
+      // Update user document
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, {
         verificationStatus: 'pending',
-        verificationDocuments: documentUrls,
-        verificationInfo: additionalInfo,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       });
 
-      enqueueSnackbar('Verification request submitted successfully!', { variant: 'success' });
+      enqueueSnackbar('Verification request submitted successfully! Please wait for admin approval.', { 
+        variant: 'success',
+        autoHideDuration: 6000
+      });
       navigate('/profile');
     } catch (error) {
       console.error('Error submitting verification:', error);

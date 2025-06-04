@@ -55,163 +55,171 @@ const App = () => {
   console.log('App render - initializing:', initializing);
   console.log('App render - loading:', loading);
 
+  const renderContent = () => {
+    if (initializing || loading) {
+      return (
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '100vh',
+            gap: 2,
+          }}
+        >
+          <CircularProgress />
+          <Typography variant="body1" color="textSecondary">
+            {initializing ? 'Initializing...' : 'Loading...'}
+          </Typography>
+        </Box>
+      );
+    }
+
+    return (
+      <Routes>
+        {/* Public routes */}
+        <Route
+          path="/"
+          element={
+            user ? (
+              emailVerified ? (
+                <Navigate to="/home" replace />
+              ) : (
+                <Navigate to="/verify-email" replace />
+              )
+            ) : (
+              <Landing />
+            )
+          }
+        />
+        <Route
+          path="/login"
+          element={
+            user ? (
+              emailVerified ? (
+                <Navigate to="/home" replace />
+              ) : (
+                <Navigate to="/verify-email" replace />
+              )
+            ) : (
+              <Login />
+            )
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            user ? (
+              emailVerified ? (
+                <Navigate to="/home" replace />
+              ) : (
+                <Navigate to="/verify-email" replace />
+              )
+            ) : (
+              <Register />
+            )
+          }
+        />
+
+        {/* Verification route */}
+        <Route
+          path="/verify-email"
+          element={
+            user && !emailVerified ? (
+              <VerificationPending />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+
+        {/* Protected routes */}
+        <Route
+          path="/home"
+          element={
+            <ProtectedRoute>
+              {user && !emailVerified ? (
+                <Navigate to="/verify-email" replace />
+              ) : (
+                <Home />
+              )}
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Other protected routes */}
+        <Route
+          path="/profile"
+          element={
+            <PrivateRoute>
+              <Profile />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/profile/:userId"
+          element={
+            <PrivateRoute>
+              <Profile />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <PrivateRoute>
+              <Settings />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/profile/:id"
+          element={
+            <ProtectedRoute>
+              {user && !emailVerified ? (
+                <Navigate to="/verify-email" replace />
+              ) : (
+                <ViewProfile />
+              )}
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Admin routes */}
+        <Route path="/admin/*" element={<AdminRoutes />} />
+
+        {/* Add these new routes */}
+        <Route 
+          path="/verify" 
+          element={
+            <PrivateRoute>
+              <VerificationForm />
+            </PrivateRoute>
+          } 
+        />
+        
+        <Route 
+          path="/admin/verifications" 
+          element={
+            <AdminRoute>
+              <VerificationDashboard />
+            </AdminRoute>
+          } 
+        />
+
+        {/* Catch all route */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  };
+
   return (
     <SnackbarProvider maxSnack={3}>
       <ThemeProvider>
         <AdminAuthProvider>
           <FirebaseInit />
-          {(initializing || loading) ? (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '100vh',
-                gap: 2,
-              }}
-            >
-              <CircularProgress />
-              <Typography variant="body1" color="textSecondary">
-                {initializing ? 'Initializing...' : 'Loading...'}
-              </Typography>
-            </Box>
-          ) : (
-            <Routes>
-              {/* Public routes */}
-              <Route
-                path="/"
-                element={
-                  user ? (
-                    emailVerified ? (
-                      <Navigate to="/home" replace />
-                    ) : (
-                      <Navigate to="/verify-email" replace />
-                    )
-                  ) : (
-                    <Landing />
-                  )
-                }
-              />
-              <Route
-                path="/login"
-                element={
-                  user ? (
-                    emailVerified ? (
-                      <Navigate to="/home" replace />
-                    ) : (
-                      <Navigate to="/verify-email" replace />
-                    )
-                  ) : (
-                    <Login />
-                  )
-                }
-              />
-              <Route
-                path="/register"
-                element={
-                  user ? (
-                    emailVerified ? (
-                      <Navigate to="/home" replace />
-                    ) : (
-                      <Navigate to="/verify-email" replace />
-                    )
-                  ) : (
-                    <Register />
-                  )
-                }
-              />
-
-              {/* Verification route */}
-              <Route
-                path="/verify-email"
-                element={
-                  user && !emailVerified ? (
-                    <VerificationPending />
-                  ) : (
-                    <Navigate to="/" replace />
-                  )
-                }
-              />
-
-              {/* Protected routes */}
-              <Route
-                path="/home"
-                element={
-                  <ProtectedRoute>
-                    {user && !emailVerified ? (
-                      <Navigate to="/verify-email" replace />
-                    ) : (
-                      <Home />
-                    )}
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* Other protected routes */}
-              <Route
-                path="/profile"
-                element={
-                  <PrivateRoute>
-                    <Profile />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/profile/:userId"
-                element={
-                  <PrivateRoute>
-                    <Profile />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <PrivateRoute>
-                    <Settings />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/profile/:id"
-                element={
-                  <ProtectedRoute>
-                    {user && !emailVerified ? (
-                      <Navigate to="/verify-email" replace />
-                    ) : (
-                      <ViewProfile />
-                    )}
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* Admin routes */}
-              <Route path="/admin/*" element={<AdminRoutes />} />
-
-              {/* Add these new routes */}
-              <Route 
-                path="/verify" 
-                element={
-                  <PrivateRoute>
-                    <VerificationForm />
-                  </PrivateRoute>
-                } 
-              />
-              
-              <Route 
-                path="/admin/verifications" 
-                element={
-                  <AdminRoute>
-                    <VerificationDashboard />
-                  </AdminRoute>
-                } 
-              />
-
-              {/* Catch all route */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          )}
+          {renderContent()}
         </AdminAuthProvider>
       </ThemeProvider>
     </SnackbarProvider>

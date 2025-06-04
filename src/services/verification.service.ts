@@ -12,8 +12,7 @@ import {
   serverTimestamp,
   DocumentReference,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../config/firebase';
+import { db } from '../config/firebase';
 import { 
   VerificationRequest, 
   VerificationDocument, 
@@ -27,23 +26,29 @@ import { updateUserProfile } from './user.service';
 const VERIFICATIONS_COLLECTION = 'verifications';
 const VERIFICATION_DOCS_COLLECTION = 'verification_documents';
 
-// Upload a verification document to storage
+// Upload a verification document
 export const uploadVerificationDocument = async (
   userId: string,
   file: File,
   type: DocumentType
 ): Promise<string> => {
   try {
-    const fileExtension = file.name.split('.').pop();
-    const fileName = `${userId}_${type}_${Date.now()}.${fileExtension}`;
-    const storageRef = ref(storage, `verification_documents/${userId}/${fileName}`);
-    
-    await uploadBytes(storageRef, file);
-    const downloadUrl = await getDownloadURL(storageRef);
-    
-    return downloadUrl;
+    // Since we're not using Firebase Storage, we'll just create a verification document
+    // with a placeholder URL. You might want to implement your own file storage solution here.
+    const verificationDoc = {
+      userId,
+      type,
+      fileName: file.name,
+      mimeType: file.type,
+      uploadedAt: new Date().toISOString(),
+      status: 'pending' as VerificationStatus,
+      fileUrl: '' // Placeholder for file URL from your chosen storage solution
+    };
+
+    const docRef = await addDoc(collection(db, VERIFICATION_DOCS_COLLECTION), verificationDoc);
+    return docRef.id;
   } catch (error) {
-    console.error('Error uploading verification document:', error);
+    console.error('Error creating verification document:', error);
     throw error;
   }
 };

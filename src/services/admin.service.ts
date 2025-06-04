@@ -11,9 +11,10 @@ import {
   startAfter,
   DocumentData,
   QueryDocumentSnapshot,
-  getCountFromServer,
+  setDoc,
+  getDoc
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db, auth } from '../config/firebase';
 import { User } from '../types/user';
 
 interface PaginatedResponse<T> {
@@ -31,11 +32,32 @@ interface AdminStats {
   monthlyActiveUsers: number;
 }
 
+// Helper function to check admin status
+const checkAdminAccess = async (uid: string) => {
+  const adminDoc = await getDocs(query(
+    collection(db, 'users'),
+    where('uid', '==', uid),
+    where('isAdmin', '==', true)
+  ));
+  
+  if (adminDoc.empty) {
+    throw new Error('Unauthorized: Admin access required');
+  }
+};
+
 export const getUsers = async (
   lastDoc?: QueryDocumentSnapshot<DocumentData>,
   pageSize: number = 10
 ): Promise<PaginatedResponse<User>> => {
   try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('Not authenticated');
+    }
+
+    // Verify admin access
+    await checkAdminAccess(currentUser.uid);
+
     let usersQuery = query(
       collection(db, 'users'),
       orderBy('createdAt', 'desc'),
@@ -130,19 +152,67 @@ export const getFlaggedContent = async (
 
 export const getAdminStats = async () => {
   try {
-    const usersSnapshot = await getDocs(collection(db, 'users'));
-    const reportsSnapshot = await getDocs(
-      query(collection(db, 'reports'), where('status', '==', 'pending'))
-    );
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('Not authenticated');
+    }
 
-    return {
+    // Verify admin access
+    await checkAdminAccess(currentUser.uid);
+
+    // Get all counts using getDocs
+    const [
+      usersSnapshot,
+      verificationSnapshot,
+      reportsSnapshot,
+      eventsSnapshot
+    ] = await Promise.all([
+      getDocs(collection(db, 'users')),
+      getDocs(query(
+        collection(db, 'verifications'),
+        where('status', '==', 'pending')
+      )),
+      getDocs(query(
+        collection(db, 'reports'),
+        where('status', '==', 'pending')
+      )),
+      getDocs(query(
+        collection(db, 'events'),
+        where('status', '==', 'active')
+      ))
+    ]);
+
+    const stats = {
       totalUsers: usersSnapshot.size,
+      pendingVerifications: verificationSnapshot.size,
       pendingReports: reportsSnapshot.size,
-      // Add more stats as needed
+      activeEvents: eventsSnapshot.size,
+      lastUpdated: new Date().toISOString()
     };
+
+    // Try to update analytics, create if doesn't exist
+    try {
+      const analyticsRef = doc(db, 'analytics', 'daily_stats');
+      const analyticsDoc = await getDoc(analyticsRef);
+      
+      if (!analyticsDoc.exists()) {
+        // Document doesn't exist, create it
+        await setDoc(analyticsRef, {
+          ...stats,
+          createdAt: new Date().toISOString()
+        });
+      } else {
+        // Document exists, update it
+        await updateDoc(analyticsRef, stats);
+      }
+    } catch (analyticsError) {
+      console.warn('Failed to update analytics, but stats were retrieved:', analyticsError);
+    }
+
+    return stats;
   } catch (error) {
     console.error('Error fetching admin stats:', error);
-    throw error;
+    throw error; // Let the component handle the error
   }
 };
 
