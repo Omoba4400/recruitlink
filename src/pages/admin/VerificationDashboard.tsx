@@ -215,6 +215,7 @@ const VerificationDashboard: React.FC = () => {
       const userRef = doc(db, 'users', request.uid);
       await updateDoc(userRef, {
         verified: true,
+        verificationStatus: 'approved',
         updatedAt: new Date().toISOString(),
       });
 
@@ -253,6 +254,7 @@ const VerificationDashboard: React.FC = () => {
       const userRef = doc(db, 'users', request.uid);
       await updateDoc(userRef, {
         verified: false,
+        verificationStatus: 'rejected',
         updatedAt: new Date().toISOString(),
       });
 

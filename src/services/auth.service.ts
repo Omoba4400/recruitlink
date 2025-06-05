@@ -321,6 +321,10 @@ export const registerUser = async (
     return { user, userData, userType };
   } catch (error: any) {
     console.error('Registration error:', error);
+    // Preserve the Firebase error code and message
+    if (error.code) {
+      throw error;
+    }
     throw new Error(error.message);
   }
 };

@@ -100,7 +100,7 @@ const VerificationForm: React.FC = () => {
     setError(null);
 
     try {
-      // Create verification document
+      // Create verification document with sanitized data
       const verificationData = {
         userId: user.uid,
         status: 'pending',
@@ -109,12 +109,12 @@ const VerificationForm: React.FC = () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         userDetails: {
-          displayName: user.displayName,
-          email: user.email,
-          photoURL: user.photoURL,
-          userType: user.userType,
-          location: user.location,
-          bio: user.bio
+          displayName: user.displayName || '',
+          email: user.email || '',
+          photoURL: user.photoURL || '', // Ensure photoURL is never undefined
+          userType: user.userType || 'athlete',
+          location: user.location || '',
+          bio: user.bio || ''
         }
       };
 

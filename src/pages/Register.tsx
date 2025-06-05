@@ -566,7 +566,13 @@ const Register: React.FC = () => {
       setVerificationSent(true);
       navigate('/verify-email');
     } catch (error: any) {
-      const errorMessage = error.message || 'Registration failed';
+      let errorMessage = error.message;
+      
+      // Handle Firebase auth errors
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered. Please use a different email address or sign in instead.';
+      }
+      
       setLocalError(errorMessage);
       enqueueSnackbar(errorMessage, { variant: 'error' });
       dispatch(setError(errorMessage));
