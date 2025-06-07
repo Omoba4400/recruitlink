@@ -115,6 +115,7 @@ const createUserDocument = async (
     bio: '',
     location: '',
     verified: false,
+    blocked: false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: false,
     verificationStatus: 'none',
@@ -221,6 +222,7 @@ const createUserDocument = async (
 
 const formatUserData = (userCredential: UserCredential, userType?: string): User => {
   const { user: firebaseUser } = userCredential;
+  const timestamp = new Date().toISOString();
   return {
     id: firebaseUser.uid,
     uid: firebaseUser.uid,
@@ -228,12 +230,13 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     displayName: firebaseUser.displayName || '',
     photoURL: firebaseUser.photoURL || undefined,
     userType: (userType as User['userType']) || 'athlete',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    lastLogin: new Date().toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLogin: timestamp,
     bio: '',
     location: '',
     verified: false,
+    blocked: false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: false,
     verificationStatus: 'none',
@@ -253,7 +256,7 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     },
     followers: [],
     following: [],
-    connections: [],
+    connections: []
   };
 };
 
@@ -292,6 +295,7 @@ export const registerUser = async (
       bio: '',
       location: '',
       verified: false,
+      blocked: false,
       emailVerified: user.emailVerified,
       isAdmin: false,
       verificationStatus: 'none',

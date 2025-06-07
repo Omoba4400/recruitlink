@@ -49,6 +49,7 @@ const formatUserData = async (firebaseUser: typeof auth.currentUser): Promise<Us
     bio: userData?.bio || '',
     location: userData?.location || '',
     verified: userData?.verified || false,
+    blocked: userData?.blocked || false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: userData?.isAdmin || false,
     verificationStatus: userData?.verificationStatus || 'none',

@@ -143,14 +143,15 @@ const VerificationDashboard: React.FC = () => {
             return null;
           }
 
-          return {
-            ...userData,
+          const combinedData = {
+            ...(userData as UserProfile),
             verificationDocuments: verificationData.documents || {},
             verificationInfo: verificationData.info,
             verificationId: doc.id,
             uid: userData.uid,
-            createdAt: verificationData.createdAt || userData.createdAt
-          } as VerificationRequest;
+            createdAt: verificationData.createdAt?.toDate().toISOString() || userData.createdAt
+          };
+          return combinedData as VerificationRequest;
         })
         .filter((request): request is VerificationRequest => request !== null);
 

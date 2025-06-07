@@ -34,6 +34,7 @@ const formatUserData = (firebaseUser: any): User => {
     bio: '',
     location: '',
     verified: false,
+    blocked: false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: false,
     verificationStatus: 'none',

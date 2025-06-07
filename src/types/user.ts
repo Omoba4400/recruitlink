@@ -1,4 +1,4 @@
-export type UserType = 'athlete' | 'coach' | 'team' | 'sponsor' | 'media' | 'fan' | 'college';
+export type UserType = 'athlete' | 'coach' | 'team' | 'sponsor' | 'media' | 'fan' | 'college' | 'admin';
 
 export interface SocialLinks {
   instagram?: string;
@@ -131,10 +131,15 @@ export interface SponsorInfo {
 }
 
 export interface MediaInfo {
-  organization: string;
-  canMessageAthletes: boolean;
-  coverageAreas: string[];
-  mediaType: string[];
+  companyName: string;
+  website?: string;
+  coverageAreas?: string[];
+  mediaType?: string[];
+  credentials?: {
+    type: string;
+    issuer: string;
+    expiryDate: string;
+  }[];
 }
 
 export interface CollegeInfo {
@@ -161,29 +166,29 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  userType: UserType;
   photoURL?: string;
-  bio: string;
-  location: string;
+  userType: UserType;
   verified: boolean;
-  verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
-  verificationId?: string; // Reference to the latest verification request
+  blocked: boolean;
   createdAt: string;
   updatedAt: string;
-  socialLinks: SocialLinks;
-  privacySettings: PrivacySettings;
-  posts?: Post[];
-  groups?: string[];
-  followers: string[];
-  following: string[];
-  connections: string[];
-  matchScore?: number;
-  // Role-specific information
+  location?: string;
+  bio?: string;
   athleteInfo?: AthleteInfo;
   coachInfo?: CoachInfo;
   teamInfo?: TeamInfo;
   sponsorInfo?: SponsorInfo;
   mediaInfo?: MediaInfo;
+  following?: string[];
+  followers?: string[];
+  interests?: string[];
+  privacySettings: PrivacySettings;
+  socialLinks: SocialLinks;
+  verificationStatus?: 'none' | 'pending' | 'approved' | 'rejected';
+  posts?: Post[];
+  groups?: string[];
+  connections: string[];
+  matchScore?: number;
   collegeInfo?: CollegeInfo;
 }
 
@@ -192,7 +197,7 @@ export interface User extends UserProfile {
   id: string;
   emailVerified: boolean;
   lastLogin: string;
-  isAdmin?: boolean;
+  isAdmin: boolean;
   blockedUsers?: string[];
   messageThreads?: string[];
 } 

@@ -203,8 +203,7 @@ const defaultSponsorInfo: SponsorInfo = {
 };
 
 const defaultMediaInfo: MediaInfo = {
-  organization: 'Not specified',
-  canMessageAthletes: false,
+  companyName: 'Not specified',
   coverageAreas: [],
   mediaType: []
 };

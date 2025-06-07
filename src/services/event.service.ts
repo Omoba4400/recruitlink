@@ -67,7 +67,7 @@ export const getEvents = async (user: User): Promise<Event[]> => {
     if (
       eventData.visibility === 'public' ||
       (eventData.visibility === 'connections' && user.connections.includes(eventData.creatorId)) ||
-      (eventData.visibility === 'followers' && user.following.includes(eventData.creatorId)) ||
+      (eventData.visibility === 'followers' && user.following?.includes(eventData.creatorId)) ||
       eventData.creatorId === user.id
     ) {
       events.push({ ...eventData, id: doc.id });
@@ -134,7 +134,7 @@ export const getUpcomingEvents = async (user: User): Promise<Event[]> => {
     if (
       eventData.visibility === 'public' ||
       (eventData.visibility === 'connections' && user.connections.includes(eventData.creatorId)) ||
-      (eventData.visibility === 'followers' && user.following.includes(eventData.creatorId)) ||
+      (eventData.visibility === 'followers' && user.following?.includes(eventData.creatorId)) ||
       eventData.creatorId === user.id
     ) {
       events.push({ ...eventData, id: doc.id });

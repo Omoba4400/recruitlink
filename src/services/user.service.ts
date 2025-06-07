@@ -249,6 +249,7 @@ export const createUserProfileIfNotExists = async (user: User): Promise<UserProf
         bio: user.bio || '',
         location: user.location || '',
         verified: false,
+        blocked: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         verificationStatus: 'none',

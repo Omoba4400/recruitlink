@@ -56,6 +56,7 @@ const FirebaseInit = () => {
             bio: userProfile.bio || '',
             location: userProfile.location || '',
             verified: userProfile.verified || false,
+            blocked: userProfile.blocked || false,
             isAdmin: false,
             verificationStatus: userProfile.verificationStatus || 'none',
             privacySettings: userProfile.privacySettings || {
@@ -103,6 +104,7 @@ const FirebaseInit = () => {
             bio: '',
             location: '',
             verified: false,
+            blocked: false,
             isAdmin: false,
             verificationStatus: 'none',
             privacySettings: {
@@ -214,6 +216,7 @@ const FirebaseInit = () => {
             bio: userProfile.bio || '',
             location: userProfile.location || '',
             verified: userProfile.verified || false,
+            blocked: userProfile.blocked || false,
             isAdmin: false,
             verificationStatus: userProfile.verificationStatus || 'none',
             privacySettings: userProfile.privacySettings || {

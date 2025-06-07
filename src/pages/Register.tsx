@@ -69,14 +69,25 @@ interface FormData {
   coachInfo?: {
     specialization: string[];
     experience: string;
+    certifications: string[];
+    canMessageAthletes: boolean;
+    verificationStatus: 'pending' | 'verified' | 'rejected';
   };
   sponsorInfo?: {
     companyName: string;
     industry: string;
+    canMessageAthletes: boolean;
+    sponsorshipTypes: string[];
+    activeOpportunities: {
+      title: string;
+      description: string;
+      requirements?: string[];
+    }[];
   };
   mediaInfo?: {
-    organization: string;
+    companyName: string;
     coverageAreas: string[];
+    mediaType: string[];
   };
 }
 
@@ -127,6 +138,7 @@ const formatUserData = (firebaseUser: any): User => {
     bio: '',
     location: '',
     verified: false,
+    blocked: false,
     emailVerified: firebaseUser.emailVerified,
     isAdmin: false,
     verificationStatus: 'none',
@@ -230,8 +242,7 @@ const Register: React.FC = () => {
         activeOpportunities: []
       } : undefined,
       mediaInfo: userType === 'media' ? {
-        organization: '',
-        canMessageAthletes: false,
+        companyName: '',
         coverageAreas: [],
         mediaType: []
       } : undefined
@@ -464,10 +475,10 @@ const Register: React.FC = () => {
             <TextField
               required
               fullWidth
-              name="organization"
-              label="Media Organization"
-              value={formData.mediaInfo?.organization || ''}
-              onChange={(e) => updateTypeSpecificField('mediaInfo', 'organization', e.target.value)}
+              name="companyName"
+              label="Media Company Name"
+              value={formData.mediaInfo?.companyName || ''}
+              onChange={(e) => updateTypeSpecificField('mediaInfo', 'companyName', e.target.value)}
               {...inputProps}
             />
             <TextField
@@ -554,8 +565,7 @@ const Register: React.FC = () => {
           activeOpportunities: []
         } : undefined,
         mediaInfo: formData.userType === 'media' ? {
-          organization: formData.mediaInfo?.organization || '',
-          canMessageAthletes: false,
+          companyName: formData.mediaInfo?.companyName || '',
           coverageAreas: formData.mediaInfo?.coverageAreas || [],
           mediaType: []
         } : undefined

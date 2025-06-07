@@ -12,10 +12,12 @@ import {
   DocumentData,
   QueryDocumentSnapshot,
   setDoc,
-  getDoc
+  getDoc,
+  Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
 import { User } from '../types/user';
+import { UserProfile, UserType } from '../types/user';
 
 interface PaginatedResponse<T> {
   items: T[];
@@ -103,13 +105,13 @@ export const updateUserStatus = async (
   }
 };
 
-export const deleteUser = async (userId: string) => {
+export const deleteUser = async (userId: string): Promise<void> => {
   try {
     const userRef = doc(db, 'users', userId);
     await deleteDoc(userRef);
   } catch (error) {
     console.error('Error deleting user:', error);
-    throw error;
+    throw new Error('Failed to delete user');
   }
 };
 
@@ -229,5 +231,68 @@ export const resolveReport = async (
   } catch (error) {
     console.error('Error resolving report:', error);
     throw error;
+  }
+};
+
+const USERS_COLLECTION = 'users';
+
+export const getAllUsers = async (): Promise<UserProfile[]> => {
+  try {
+    const usersQuery = query(
+      collection(db, USERS_COLLECTION),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const snapshot = await getDocs(usersQuery);
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        uid: doc.id,
+        ...data,
+        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt
+      } as UserProfile;
+    });
+  } catch (error) {
+    console.error('Error getting all users:', error);
+    throw new Error('Failed to fetch users');
+  }
+};
+
+export const updateUserRole = async (userId: string, newRole: UserType): Promise<void> => {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    await updateDoc(userRef, {
+      userType: newRole,
+      updatedAt: Timestamp.now()
+    });
+  } catch (error) {
+    console.error('Error updating user role:', error);
+    throw new Error('Failed to update user role');
+  }
+};
+
+export const verifyUser = async (userId: string): Promise<void> => {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    await updateDoc(userRef, {
+      verified: true,
+      updatedAt: Timestamp.now()
+    });
+  } catch (error) {
+    console.error('Error verifying user:', error);
+    throw new Error('Failed to verify user');
+  }
+};
+
+export const blockUser = async (userId: string, blocked: boolean): Promise<void> => {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    await updateDoc(userRef, {
+      blocked,
+      updatedAt: Timestamp.now()
+    });
+  } catch (error) {
+    console.error('Error updating user block status:', error);
+    throw new Error('Failed to update user block status');
   }
 }; 

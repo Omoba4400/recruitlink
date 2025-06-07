@@ -164,6 +164,7 @@ const Messages: React.FC = () => {
         bio: '',
         location: '',
         verified: false,
+        blocked: false,
         verificationStatus: 'none',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

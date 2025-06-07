@@ -79,6 +79,12 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow get: if isAdmin();
       
+      // User status subcollection
+      match /status/{document=**} {
+        allow read: if isAuthenticated();
+        allow write: if request.auth.uid == userId;
+      }
+
       // User connections subcollection
       match /connections/{connectionId} {
         allow read: if isAuthenticated();
@@ -246,22 +252,10 @@ service cloud.firestore {
       }
     }
     
-    // User status collection rules
-    match /userStatus/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if request.auth.uid == userId;
-    }
-    
     // User FCM tokens collection rules
     match /fcmTokens/{userId} {
       allow read: if isOwner(userId);
       allow write: if isOwner(userId);
-    }
-
-    // User presence
-    match /status/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if request.auth.uid == userId;
     }
 
     // Message read receipts
