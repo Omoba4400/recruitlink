@@ -13,14 +13,12 @@ import {
   Tooltip,
   Card,
   CardContent,
-  CardMedia,
   List,
   ListItem,
   ListItemIcon,
   ListItemText,
-  Badge,
-  Tab,
-  Tabs,
+  Divider,
+  Grid,
 } from '@mui/material';
 import {
   Verified,
@@ -32,40 +30,21 @@ import {
   Twitter,
   LinkedIn,
   YouTube,
+  School,
+  Work,
   EmojiEvents,
-  CalendarMonth,
-  PhotoLibrary,
-  Description,
+  Groups,
+  Edit,
+  Share,
+  MoreHoriz,
 } from '@mui/icons-material';
 import { RootState } from '../store';
-import type { User, SocialLinks } from '../types/user';
+import type { User } from '../types/user';
 import Header from '../components/layout/Header';
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`profile-tabpanel-${index}`}
-      aria-labelledby={`profile-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
 
 const ViewProfile = () => {
   const { userId } = useParams();
   const currentUser = useSelector((state: RootState) => state.auth.user);
-  const [activeTab, setActiveTab] = useState(0);
   const [profileData, setProfileData] = useState<User | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'none' | 'pending' | 'connected'>('none');
   const [isFollowing, setIsFollowing] = useState(false);
@@ -86,7 +65,7 @@ const ViewProfile = () => {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           lastLogin: new Date().toISOString(),
-          bio: 'Professional athlete with 5+ years of experience',
+          bio: 'Professional athlete with 5+ years of experience in competitive basketball. Currently playing for the New York Eagles. Specializing in point guard position with strong leadership skills and team coordination.',
           location: 'New York, USA',
           verified: true,
           verificationStatus: 'none',
@@ -101,10 +80,10 @@ const ViewProfile = () => {
           emailVerified: true,
           isAdmin: false,
           socialLinks: {
-            instagram: '',
-            twitter: '',
-            linkedin: '',
-            youtube: ''
+            instagram: 'https://instagram.com/johndoe',
+            twitter: 'https://twitter.com/johndoe',
+            linkedin: 'https://linkedin.com/in/johndoe',
+            youtube: 'https://youtube.com/johndoe'
           },
           followers: [],
           following: [],
@@ -112,9 +91,7 @@ const ViewProfile = () => {
         };
 
         setProfileData(mockUser);
-        // Check if current user is connected
         setConnectionStatus(mockUser.connections.includes(currentUser?.id || '') ? 'connected' : 'none');
-        // Check if current user is following
         setIsFollowing(mockUser.followers.includes(currentUser?.id || ''));
         setLoading(false);
       } catch (error) {
@@ -128,27 +105,19 @@ const ViewProfile = () => {
     }
   }, [userId, currentUser?.id]);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
-
   const handleConnect = () => {
     setConnectionStatus('pending');
-    // TODO: Implement connection request logic
   };
 
   const handleDisconnect = () => {
     setConnectionStatus('none');
-    // TODO: Implement disconnect logic
   };
 
   const handleFollow = () => {
     setIsFollowing(!isFollowing);
-    // TODO: Implement follow/unfollow logic
   };
 
   const handleMessage = () => {
-    // TODO: Implement messaging logic
     console.log('Open message dialog');
   };
 
@@ -166,78 +135,106 @@ const ViewProfile = () => {
   return (
     <Box>
       <Header />
-      <Container maxWidth="lg" sx={{ mt: 10, mb: 4 }}>
-        {/* Profile Header */}
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-            <Box>
-              <Badge
-                overlap="circular"
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                badgeContent={
-                  profileData.verified ? (
-                    <Tooltip title="Verified Profile">
-                      <Verified color="primary" />
-                    </Tooltip>
-                  ) : null
-                }
-              >
-                <Avatar
-                  sx={{ width: 120, height: 120 }}
-                  src={profileData.photoURL || undefined}
-                >
-                  {profileData.displayName?.[0]}
-                </Avatar>
-              </Badge>
+      <Container maxWidth="lg" sx={{ mt: 8 }}>
+        {/* Profile Card */}
+        <Paper sx={{ mb: 3, borderRadius: 2, overflow: 'hidden' }}>
+          {/* Banner Image */}
+          <Box
+            sx={{
+              height: 200,
+              bgcolor: 'primary.main',
+              backgroundImage: 'url(https://source.unsplash.com/random/1600x400?sports)',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              position: 'relative'
+            }}
+          />
+
+          {/* Profile Info Section */}
+          <Box sx={{ p: 3, position: 'relative' }}>
+            {/* Profile Actions */}
+            <Box sx={{ position: 'absolute', right: 24, top: -60, display: 'flex', gap: 1 }}>
+              <IconButton sx={{ bgcolor: 'background.paper', '&:hover': { bgcolor: 'background.default' } }}>
+                <Share />
+              </IconButton>
+              <IconButton sx={{ bgcolor: 'background.paper', '&:hover': { bgcolor: 'background.default' } }}>
+                <Edit />
+              </IconButton>
+              <IconButton sx={{ bgcolor: 'background.paper', '&:hover': { bgcolor: 'background.default' } }}>
+                <MoreHoriz />
+              </IconButton>
             </Box>
-            <Box sx={{ flex: 1 }}>
-              <Box display="flex" alignItems="center" mb={1}>
+
+            {/* Avatar */}
+            <Avatar
+              sx={{
+                width: 150,
+                height: 150,
+                border: 4,
+                borderColor: 'background.paper',
+                position: 'absolute',
+                top: -75,
+                left: 24
+              }}
+              src={profileData.photoURL || undefined}
+            >
+              {profileData.displayName?.[0]}
+            </Avatar>
+
+            {/* Profile Header */}
+            <Box sx={{ ml: '180px', mb: 2 }}>
+              <Box display="flex" alignItems="center" gap={1}>
                 <Typography variant="h4" component="h1">
                   {profileData.displayName}
                 </Typography>
-              </Box>
-              <Box display="flex" alignItems="center" mb={1}>
-                <Chip
-                  label={profileData.userType}
-                  color="primary"
-                  size="small"
-                  sx={{ mr: 1 }}
-                />
-                {profileData.location && (
-                  <Chip
-                    icon={<LocationOn />}
-                    label={profileData.location}
-                    size="small"
-                    variant="outlined"
-                  />
+                {profileData.verified && (
+                  <Tooltip title="Verified Profile">
+                    <Verified color="primary" />
+                  </Tooltip>
                 )}
               </Box>
-              <Box display="flex" gap={1}>
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                {profileData.userType.charAt(0).toUpperCase() + profileData.userType.slice(1)}
+              </Typography>
+              <Box display="flex" alignItems="center" gap={2} mb={1}>
+                <Box display="flex" alignItems="center">
+                  <LocationOn sx={{ mr: 0.5 }} color="action" />
+                  <Typography color="text.secondary">{profileData.location}</Typography>
+                </Box>
+                <Box display="flex" alignItems="center">
+                  <Groups sx={{ mr: 0.5 }} color="action" />
+                  <Typography color="text.secondary">500+ connections</Typography>
+                </Box>
+              </Box>
+
+              {/* Action Buttons */}
+              <Box display="flex" gap={1} mt={2}>
                 {connectionStatus === 'none' && (
-                  <Tooltip title="Send connection request">
-                    <Button
-                      variant="contained"
-                      startIcon={<Add />}
-                      onClick={handleConnect}
-                    >
-                      Connect
-                    </Button>
-                  </Tooltip>
+                  <Button
+                    variant="contained"
+                    startIcon={<Add />}
+                    onClick={handleConnect}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    Connect
+                  </Button>
                 )}
                 {connectionStatus === 'pending' && (
                   <Button
                     variant="outlined"
                     disabled
+                    sx={{ borderRadius: 2 }}
                   >
-                    Request Pending
+                    Pending
                   </Button>
                 )}
                 {connectionStatus === 'connected' && (
                   <>
                     <Button
-                      variant="outlined"
+                      variant="contained"
                       startIcon={<Message />}
                       onClick={handleMessage}
+                      sx={{ borderRadius: 2 }}
                     >
                       Message
                     </Button>
@@ -246,14 +243,16 @@ const ViewProfile = () => {
                       color="error"
                       startIcon={<PersonRemove />}
                       onClick={handleDisconnect}
+                      sx={{ borderRadius: 2 }}
                     >
-                      Remove Connection
+                      Remove
                     </Button>
                   </>
                 )}
                 <Button
                   variant={isFollowing ? "outlined" : "contained"}
                   onClick={handleFollow}
+                  sx={{ borderRadius: 2 }}
                 >
                   {isFollowing ? 'Following' : 'Follow'}
                 </Button>
@@ -262,122 +261,131 @@ const ViewProfile = () => {
           </Box>
         </Paper>
 
-        {/* Profile Tabs */}
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={activeTab} onChange={handleTabChange}>
-            <Tab icon={<Description />} label="About" />
-            <Tab icon={<PhotoLibrary />} label="Posts" />
-            <Tab icon={<CalendarMonth />} label="Events" />
-          </Tabs>
-        </Box>
+        {/* Main Content Grid */}
+        <Grid container spacing={3}>
+          {/* Left Column */}
+          <Grid item xs={12} md={8}>
+            {/* About Section */}
+            <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom>About</Typography>
+              <Typography color="text.secondary" sx={{ whiteSpace: 'pre-line' }}>
+                {profileData.bio}
+              </Typography>
+            </Paper>
 
-        {/* About Tab */}
-        <TabPanel value={activeTab} index={0}>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            <Box sx={{ width: { xs: '100%', md: '48%' } }}>
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>Bio</Typography>
-                <Typography>{profileData.bio}</Typography>
-              </Paper>
-            </Box>
-            <Box sx={{ width: { xs: '100%', md: '48%' } }}>
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>Social Links</Typography>
-                <List>
-                  {profileData.socialLinks && Object.entries(profileData.socialLinks).map(([platform, url]) => (
-                    url && (
-                      <ListItem key={platform}>
-                        <ListItemIcon>
-                          {platform === 'instagram' && <Instagram />}
-                          {platform === 'twitter' && <Twitter />}
-                          {platform === 'linkedin' && <LinkedIn />}
-                          {platform === 'youtube' && <YouTube />}
-                        </ListItemIcon>
-                        <ListItemText>
-                          <a href={url.toString()} target="_blank" rel="noopener noreferrer">
-                            {platform.charAt(0).toUpperCase() + platform.slice(1)}
-                          </a>
-                        </ListItemText>
-                      </ListItem>
-                    )
-                  ))}
-                </List>
-              </Paper>
-            </Box>
-            {profileData.userType === 'athlete' && (
-              <Box sx={{ width: '100%' }}>
-                <Paper sx={{ p: 3 }}>
-                  <Typography variant="h6" gutterBottom>
-                    <EmojiEvents sx={{ mr: 1, verticalAlign: 'middle' }} />
-                    Statistics
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                    <Box sx={{ width: { xs: '45%', md: '22%' } }}>
-                      <Typography variant="subtitle2">Games Played</Typography>
-                      <Typography variant="h4">24</Typography>
-                    </Box>
-                    <Box sx={{ width: { xs: '45%', md: '22%' } }}>
-                      <Typography variant="subtitle2">Goals</Typography>
-                      <Typography variant="h4">12</Typography>
-                    </Box>
-                    <Box sx={{ width: { xs: '45%', md: '22%' } }}>
-                      <Typography variant="subtitle2">Assists</Typography>
-                      <Typography variant="h4">8</Typography>
-                    </Box>
-                    <Box sx={{ width: { xs: '45%', md: '22%' } }}>
-                      <Typography variant="subtitle2">Win Rate</Typography>
-                      <Typography variant="h4">75%</Typography>
-                    </Box>
-                  </Box>
-                </Paper>
-              </Box>
-            )}
-          </Box>
-        </TabPanel>
-
-        {/* Posts Tab */}
-        <TabPanel value={activeTab} index={1}>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-            {[1, 2, 3, 4].map((post) => (
-              <Box key={post} sx={{ width: { xs: '100%', sm: '45%', md: '31%' } }}>
-                <Card>
-                  <CardMedia
-                    component="img"
-                    height="200"
-                    image={`https://source.unsplash.com/random/400x400?sports&${post}`}
-                    alt={`Post ${post}`}
+            {/* Experience Section */}
+            <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                <Work sx={{ mr: 1 }} /> Experience
+              </Typography>
+              <List>
+                <ListItem>
+                  <ListItemIcon>
+                    <Avatar sx={{ width: 48, height: 48 }}>NE</Avatar>
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Point Guard"
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          New York Eagles
+                        </Typography>
+                        <br />
+                        <Typography variant="body2" color="text.secondary">
+                          2020 - Present · 3 yrs
+                        </Typography>
+                      </>
+                    }
                   />
-                  <CardContent>
-                    <Typography variant="body2" color="text.secondary">
-                      Post caption #{post}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Box>
-            ))}
-          </Box>
-        </TabPanel>
+                </ListItem>
+              </List>
+            </Paper>
 
-        {/* Events Tab */}
-        <TabPanel value={activeTab} index={2}>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-            {[1, 2].map((event) => (
-              <Box key={event} sx={{ width: { xs: '100%', md: '48%' } }}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6">Event #{event}</Typography>
-                    <Typography color="text.secondary">
-                      📅 Upcoming Tournament
-                    </Typography>
-                    <Typography color="text.secondary">
-                      📍 Main Stadium
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Box>
-            ))}
-          </Box>
-        </TabPanel>
+            {/* Education Section */}
+            <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                <School sx={{ mr: 1 }} /> Education
+              </Typography>
+              <List>
+                <ListItem>
+                  <ListItemIcon>
+                    <Avatar sx={{ width: 48, height: 48 }}>NU</Avatar>
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="New York University"
+                    secondary={
+                      <>
+                        <Typography variant="body2" color="text.secondary">
+                          Bachelor's Degree in Sports Management
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          2016 - 2020
+                        </Typography>
+                      </>
+                    }
+                  />
+                </ListItem>
+              </List>
+            </Paper>
+          </Grid>
+
+          {/* Right Column */}
+          <Grid item xs={12} md={4}>
+            {/* Stats Card */}
+            <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                <EmojiEvents sx={{ mr: 1 }} /> Career Statistics
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="h4" color="primary">24</Typography>
+                  <Typography variant="body2" color="text.secondary">Games Played</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="h4" color="primary">12</Typography>
+                  <Typography variant="body2" color="text.secondary">Goals</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="h4" color="primary">8</Typography>
+                  <Typography variant="body2" color="text.secondary">Assists</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="h4" color="primary">75%</Typography>
+                  <Typography variant="body2" color="text.secondary">Win Rate</Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+
+            {/* Social Links */}
+            <Paper sx={{ p: 3, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom>Social Media</Typography>
+              <List>
+                {profileData.socialLinks && Object.entries(profileData.socialLinks).map(([platform, url]) => (
+                  url && (
+                    <ListItem key={platform} sx={{ px: 0 }}>
+                      <ListItemIcon>
+                        {platform === 'instagram' && <Instagram color="action" />}
+                        {platform === 'twitter' && <Twitter color="action" />}
+                        {platform === 'linkedin' && <LinkedIn color="action" />}
+                        {platform === 'youtube' && <YouTube color="action" />}
+                      </ListItemIcon>
+                      <ListItemText>
+                        <a 
+                          href={url.toString()} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ textDecoration: 'none', color: 'inherit' }}
+                        >
+                          {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                        </a>
+                      </ListItemText>
+                    </ListItem>
+                  )
+                ))}
+              </List>
+            </Paper>
+          </Grid>
+        </Grid>
       </Container>
     </Box>
   );

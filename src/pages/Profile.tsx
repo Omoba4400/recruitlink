@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
+import { RootState } from '../store';
 import {
   Box,
   Container,
@@ -27,6 +29,18 @@ import {
   ListItemAvatar,
   CardActions,
   CircularProgress,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Switch,
+  FormControlLabel,
+  ListItemSecondaryAction,
 } from '@mui/material';
 import {
   LocationOn,
@@ -43,10 +57,10 @@ import {
   VideoLibrary,
   Edit as EditIcon,
   Save as SaveIcon,
-  Instagram,
-  Twitter,
-  LinkedIn,
-  YouTube,
+  Instagram as InstagramIcon,
+  Twitter as TwitterIcon,
+  LinkedIn as LinkedInIcon,
+  YouTube as YouTubeIcon,
   PersonRemove,
   Share,
   BookmarkBorder,
@@ -55,9 +69,9 @@ import {
   Group,
   Business,
   Settings,
+  Cancel as CancelIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
-import { useSelector, useDispatch } from 'react-redux';
-import { RootState } from '../store/store';
 import Header from '../components/layout/Header';
 import { uploadToCloudinary } from '../config/cloudinary';
 import { getUserProfile, updateUserProfile, updateSocialLinks } from '../services/user.service';
@@ -81,6 +95,119 @@ import type {
   AcademicInfo
 } from '../types/user';
 import { useAuth } from '../contexts/AuthContext';
+import Post from '../components/posts/Post';
+import { PostWithAuthor, Post as PostType, Reaction, ReactionType } from '../types/post';
+import {
+  createPost,
+  getFeed,
+  addReaction,
+  removeReaction,
+  addComment,
+  deletePost,
+  updatePost,
+  sharePost,
+} from '../services/post.service';
+import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { QueryDocumentSnapshot } from 'firebase/firestore';
+import { onPostDeleted } from '../events/postEvents';
+import { emitPostDeleted } from '../events/postEvents';
+
+const POST_LIMIT = 10;
+
+interface DeleteDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  content: string;
+}
+
+const DeleteDialog: React.FC<DeleteDialogProps> = ({ open, onClose, onConfirm, title, content }) => (
+  <Dialog open={open} onClose={onClose}>
+    <DialogTitle>{title}</DialogTitle>
+    <DialogContent>{content}</DialogContent>
+    <DialogActions>
+      <Button onClick={onClose}>Cancel</Button>
+      <Button onClick={onConfirm} color="error">Delete</Button>
+    </DialogActions>
+  </Dialog>
+);
+
+const defaultSocialLinks: SocialLinks = {
+  instagram: '',
+  twitter: '',
+  linkedin: '',
+  youtube: ''
+};
+
+const defaultPrivacySettings: PrivacySettings = {
+  profileVisibility: 'public',
+  allowMessagesFrom: 'everyone',
+  showEmail: true,
+  showLocation: true,
+  showAcademicInfo: true,
+  showAthleteStats: true,
+};
+
+const defaultAthleteInfo: AthleteInfo = {
+  sports: [{
+    sport: 'Not specified',
+    position: 'Not specified',
+    level: 'Not specified',
+    experience: 0,
+    specialties: [],
+    achievements: []
+  }],
+  academicInfo: {
+    currentSchool: '',
+    graduationYear: ''
+  },
+  verificationStatus: 'pending',
+  media: [],
+  memberships: [],
+  interests: [],
+  activities: [],
+  awards: [],
+  achievements: [],
+  eligibility: {
+    isEligible: true
+  },
+  recruitingStatus: 'open'
+};
+
+const defaultCoachInfo: CoachInfo = {
+  specialization: [],
+  experience: '',
+  certifications: [],
+  canMessageAthletes: false,
+  verificationStatus: 'pending'
+};
+
+const defaultTeamInfo: TeamInfo = {
+  teamName: 'Not specified',
+  sport: 'Not specified',
+  canMessageAthletes: false,
+  achievements: [],
+  roster: [],
+  openPositions: []
+};
+
+const defaultSponsorInfo: SponsorInfo = {
+  companyName: 'Not specified',
+  industry: 'Not specified',
+  canMessageAthletes: false,
+  sponsorshipTypes: [],
+  activeOpportunities: []
+};
+
+const defaultMediaInfo: MediaInfo = {
+  organization: 'Not specified',
+  canMessageAthletes: false,
+  coverageAreas: [],
+  mediaType: []
+};
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -88,9 +215,7 @@ interface TabPanelProps {
   value: number;
 }
 
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
+const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other }) => {
   return (
     <div
       role="tabpanel"
@@ -102,7 +227,7 @@ function TabPanel(props: TabPanelProps) {
       {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   );
-}
+};
 
 interface SocialLink {
   instagram: string;
@@ -111,594 +236,465 @@ interface SocialLink {
   youtube: string;
 }
 
-// Add interface for user data
-interface UserData {
-  id: string;
-  name: string;
-  role: string;
-  location: string;
-  sport: string;
-  team?: string;
-  isVerified: boolean;
-  bio: string;
-  stats: {
-    [key: string]: number;
-  };
-  socialLinks: SocialLink;
+interface PostsTabProps {
+  userId: string;
+  isOwnProfile: boolean;
+  userType: string;
+  loading: boolean;
+  setLoading: (loading: boolean) => void;
+  hasMorePosts: boolean;
+  setHasMorePosts: (hasMore: boolean) => void;
+  editPost: string;
+  setEditPost: (postId: string) => void;
+  showDeleteDialog: boolean;
+  setShowDeleteDialog: (show: boolean) => void;
+  selectedPost: string;
+  setSelectedPost: (postId: string) => void;
+  posts: PostWithAuthor[];
+  setPosts: React.Dispatch<React.SetStateAction<PostWithAuthor[]>>;
+  lastVisible: DocumentSnapshot<DocumentData> | null;
+  setLastVisible: (lastVisible: DocumentSnapshot<DocumentData> | null) => void;
 }
 
-// Mock user database - replace with actual API calls
-const mockUsers: Record<string, UserData> = {
-  'user1': {
-    id: 'user1',
-    name: 'John Smith',
-    role: 'Athlete',
-    location: 'New York, USA',
-    sport: 'Basketball',
-    team: 'Team Thunder',
-    isVerified: true,
-    bio: 'Professional basketball player with 5 years of experience. Passionate about the game and helping young athletes develop their skills.',
-    stats: {
-      gamesPlayed: 156,
-      wins: 98,
-      performance: 85,
-    },
-    socialLinks: {
-      instagram: 'https://instagram.com/johnsmith',
-      twitter: 'https://twitter.com/johnsmith',
-      linkedin: 'https://linkedin.com/in/sarahjohnson',
-      youtube: 'https://youtube.com/johnsmith',
-    },
-  },
-  'user2': {
-    id: 'user2',
-    name: 'Sarah Johnson',
-    role: 'Coach',
-    location: 'Los Angeles, USA',
-    sport: 'Basketball',
-    team: 'LA Lakers',
-    isVerified: true,
-    bio: 'Professional basketball coach with 10 years of experience. Specialized in player development and team strategy.',
-    stats: {
-      teamsCoached: 5,
-      championships: 3,
-      winRate: 75,
-    },
-    socialLinks: {
-      instagram: 'https://instagram.com/sarahjohnson',
-      twitter: 'https://twitter.com/sarahjohnson',
-      linkedin: 'https://linkedin.com/in/sarahjohnson',
-      youtube: 'https://youtube.com/sarahjohnson',
-    },
-  },
-  'user3': {
-    id: 'user3',
-    name: 'Team Thunder',
-    role: 'Team',
-    location: 'Chicago, USA',
-    sport: 'Basketball',
-    isVerified: true,
-    bio: 'Professional basketball team competing in the National League. Home to some of the best players in the country.',
-    stats: {
-      seasonWins: 42,
-      championships: 2,
-      ranking: 3,
-    },
-    socialLinks: {
-      instagram: 'https://instagram.com/teamthunder',
-      twitter: 'https://twitter.com/teamthunder',
-      linkedin: 'https://linkedin.com/in/teamthunder',
-      youtube: 'https://youtube.com/teamthunder',
-    },
-  },
-};
+const PostsTab: React.FC<PostsTabProps> = ({
+  userId,
+  isOwnProfile,
+  userType,
+  loading,
+  setLoading,
+  hasMorePosts,
+  setHasMorePosts,
+  editPost,
+  setEditPost,
+  showDeleteDialog,
+  setShowDeleteDialog,
+  selectedPost,
+  setSelectedPost,
+  posts,
+  setPosts,
+  lastVisible,
+  setLastVisible
+}) => {
+  const { enqueueSnackbar } = useSnackbar();
+  const user = useSelector((state: RootState) => state.auth.user);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-const mockPosts = [
-  {
-    id: 1,
-    type: 'image',
-    media: 'https://placekitten.com/300/300',
-    caption: 'Great game today! 🏆',
-    likes: 120,
-    comments: 15,
-    date: '2024-03-15',
-  },
-  // Add more mock posts
-];
+  // Listen for post deletion events
+  useEffect(() => {
+    const cleanup = onPostDeleted((deletedPostId) => {
+      console.log('PostsTab - Received post deleted event:', deletedPostId);
+      setPosts((prevPosts) => prevPosts.filter(post => post.id !== deletedPostId));
+    });
 
-const mockEvents = [
-  {
-    id: 1,
-    title: 'Summer Training Camp',
-    date: '2024-06-15',
-    location: 'Main Stadium',
-    attendees: 45,
-    isCreator: true,
-  },
-  // Add more mock events
-];
+    return cleanup;
+  }, [setPosts]);
 
-const mockConnections = [
-  {
-    id: 1,
-    name: 'John Smith',
-    role: 'Athlete',
-    avatar: 'JS',
-    isVerified: true,
-  },
-  // Add more mock connections
-];
+  useEffect(() => {
+    const loadPosts = async () => {
+      if (!isInitialLoad) return;
+      
+      try {
+        setLoading(true);
+        const fetchedPosts = await getFeed(userId);
+        setPosts(fetchedPosts.posts);
+        setLastVisible(fetchedPosts.lastVisible);
+        setHasMorePosts(fetchedPosts.hasMore);
+      } catch (error) {
+        console.error('Error loading posts:', error);
+        enqueueSnackbar('Failed to load posts', { variant: 'error' });
+      } finally {
+        setLoading(false);
+        setIsInitialLoad(false);
+      }
+    };
 
-const mockAthleteStats = {
-  gamesPlayed: 24,
-  goals: 15,
-  assists: 10,
-  points: 25,
-  monthlyProgress: [
-    { month: 'Jan', value: 75 },
-    { month: 'Feb', value: 82 },
-    { month: 'Mar', value: 88 },
-  ],
-};
+    loadPosts();
+  }, [userId, isInitialLoad, enqueueSnackbar, setLoading, setPosts, setHasMorePosts, setLastVisible]);
 
-// Helper function to convert auth user type to profile user type
-const mapUserType = (authType: UserType): UserType => {
-  switch (authType) {
-    case 'athlete':
-      return 'athlete';
-    case 'coach':
-      return 'coach';
-    case 'team':
-      return 'team';
-    case 'sponsor':
-      return 'sponsor';
-    case 'media':
-      return 'media';
-    case 'fan':
-      return 'fan';
-    default:
-      return 'fan';
+  const handleLoadMore = async () => {
+    if (!hasMorePosts || loading) return;
+
+    try {
+      setLoading(true);
+      const morePosts = await getFeed(userId, lastVisible || undefined);
+      setPosts((prevPosts: PostWithAuthor[]) => [...prevPosts, ...morePosts.posts]);
+      setLastVisible(morePosts.lastVisible);
+      setHasMorePosts(morePosts.hasMore);
+    } catch (error) {
+      console.error('Error loading more posts:', error);
+      enqueueSnackbar('Failed to load more posts', { variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePostDelete = async () => {
+    if (!selectedPost || !user?.uid) return;
+
+    try {
+      await deletePost(selectedPost, user.uid);
+      setPosts((prevPosts: PostWithAuthor[]) => prevPosts.filter(post => post.id !== selectedPost));
+      
+      // Emit post deleted event
+      emitPostDeleted(selectedPost);
+      
+      enqueueSnackbar('Post deleted successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      enqueueSnackbar('Failed to delete post', { variant: 'error' });
+    } finally {
+      setShowDeleteDialog(false);
+      setSelectedPost('');
+    }
+  };
+
+  const handlePostEdit = async (content: string) => {
+    if (!editPost || !user?.uid) return;
+
+    try {
+      await updatePost(editPost, user.uid, { content });
+      setPosts((prevPosts: PostWithAuthor[]) => prevPosts.map(post => 
+        post.id === editPost ? { ...post, content } : post
+      ));
+      enqueueSnackbar('Post updated successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error updating post:', error);
+      enqueueSnackbar('Failed to update post', { variant: 'error' });
+    } finally {
+      setEditPost('');
+    }
+  };
+
+  const handleReaction = async (postId: string, reactionType: ReactionType) => {
+    if (!user?.uid) return;
+
+    try {
+      const post = posts.find(p => p.id === postId);
+      if (!post) return;
+
+      const hasReacted = post.reactions?.some(
+        r => r.userId === user.uid && r.type === reactionType
+      );
+
+      if (hasReacted) {
+        await removeReaction(postId, user.uid);
+        setPosts((prevPosts: PostWithAuthor[]) => prevPosts.map(post => 
+          post.id === postId ? {
+            ...post,
+            reactions: post.reactions.filter(r => !(r.userId === user.uid && r.type === reactionType))
+          } : post
+        ));
+      } else {
+        await addReaction(postId, user.uid, reactionType);
+        const newReaction: Reaction = {
+          userId: user.uid,
+          type: reactionType,
+          createdAt: Timestamp.now()
+        };
+        setPosts((prevPosts: PostWithAuthor[]) => prevPosts.map(post => 
+          post.id === postId ? {
+            ...post,
+            reactions: [...post.reactions, newReaction]
+          } : post
+        ));
+      }
+    } catch (error) {
+      console.error('Error handling reaction:', error);
+      enqueueSnackbar('Failed to update reaction', { variant: 'error' });
+    }
+  };
+
+  if (!user) {
+    return (
+      <Box textAlign="center" my={4}>
+        <Typography variant="h6" color="text.secondary">
+          Please sign in to view posts
+        </Typography>
+      </Box>
+    );
   }
+
+  return (
+    <>
+      {loading && posts.length === 0 ? (
+        <Box display="flex" justifyContent="center" my={4}>
+          <CircularProgress />
+        </Box>
+      ) : posts.length === 0 ? (
+        <Box textAlign="center" my={4}>
+          <Typography variant="h6" color="text.secondary">
+            No posts yet
+          </Typography>
+        </Box>
+      ) : (
+        <>
+          {posts.map((post) => (
+            <Post
+              key={post.id}
+              post={post}
+              isOwnPost={isOwnProfile}
+              onDelete={async () => {
+                setSelectedPost(post.id);
+                setShowDeleteDialog(true);
+                return Promise.resolve();
+              }}
+              onEdit={async () => {
+                setEditPost(post.id);
+                return Promise.resolve();
+              }}
+              onReaction={async (type: ReactionType) => {
+                try {
+                  await handleReaction(post.id, type);
+                } catch (error) {
+                  console.error('Error adding reaction:', error);
+                  enqueueSnackbar('Failed to add reaction', { variant: 'error' });
+                }
+              }}
+            />
+          ))}
+          {hasMorePosts && (
+            <Box display="flex" justifyContent="center" my={2}>
+              <Button
+                variant="outlined"
+                onClick={handleLoadMore}
+                disabled={loading}
+              >
+                {loading ? 'Loading...' : 'Load More'}
+              </Button>
+            </Box>
+          )}
+        </>
+      )}
+      <DeleteDialog
+        open={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={handlePostDelete}
+        title="Delete Post"
+        content="Are you sure you want to delete this post? This action cannot be undone."
+      />
+    </>
+  );
 };
 
 const Profile: React.FC = () => {
-  const user = useSelector((state: RootState) => state.auth.user);
-  const reduxProfile = useSelector((state: RootState) => state.auth.profile);
+  const { id } = useParams<{ id?: string }>();
+  const navigate = useNavigate();
   const dispatch = useDispatch();
+  const { enqueueSnackbar } = useSnackbar();
+  const user = useSelector((state: RootState) => state.auth.user);
+  const profile = useSelector((state: RootState) => state.auth.profile);
+  
+  // All useState and useRef hooks at the top
+  const [loading, setLoading] = useState(true);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [profileData, setProfileData] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [editPost, setEditPost] = useState<string>('');
+  const [selectedPost, setSelectedPost] = useState<string>('');
+  const [posts, setPosts] = useState<PostWithAuthor[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { enqueueSnackbar } = useSnackbar();
-  const navigate = useNavigate();
-  const { userId } = useParams();
+  const isMountedRef = useRef(true);
+  const lastPostRef = useRef<any>(null);
+  const [lastVisible, setLastVisible] = useState<DocumentSnapshot<DocumentData> | null>(null);
+  const postsLoadedRef = useRef(false);
 
-  console.log('Profile render - user:', user);
-  console.log('Profile render - reduxProfile:', reduxProfile);
+  // Memoize the PostsTab component props
+  const postsTabProps = React.useMemo(() => ({
+    userId: id || user?.uid || '',
+    isOwnProfile: (id || user?.uid) === user?.uid,
+    userType: profileData?.userType || '',
+    loading: postsLoading,
+    setLoading: setPostsLoading,
+    hasMorePosts,
+    setHasMorePosts,
+    editPost,
+    setEditPost,
+    showDeleteDialog,
+    setShowDeleteDialog,
+    selectedPost,
+    setSelectedPost,
+    posts,
+    setPosts,
+    lastVisible,
+    setLastVisible
+  }), [id, user?.uid, profileData?.userType, postsLoading, hasMorePosts, editPost, showDeleteDialog, selectedPost, posts, lastVisible]);
 
-  const defaultSocialLinks: SocialLinks = {
-    twitter: '',
-    facebook: '',
-    instagram: '',
-    linkedin: '',
-    youtube: '',
-    website: ''
-  };
-
-  const defaultPrivacySettings: PrivacySettings = {
-    profileVisibility: 'public' as const,
-    allowMessagesFrom: 'everyone' as const,
-    showEmail: true,
-    showLocation: true,
-    showAcademicInfo: true,
-    showAthleteStats: true
-  };
-
-  const defaultAthleteInfo: AthleteInfo = {
-    sports: [{
-      sport: 'Not specified',
-      position: 'Not specified',
-      level: 'Not specified',
-      experience: 0,
-      specialties: [],
-      achievements: []
-    }],
-    academicInfo: {
-      currentSchool: '',
-      graduationYear: ''
-    },
-    verificationStatus: 'pending' as const,
-    media: [],
-    memberships: [],
-    interests: [],
-    activities: [],
-    awards: [],
-    achievements: [],
-    eligibility: {
-      isEligible: true
-    },
-    recruitingStatus: 'open' as const
-  };
-
-  const defaultCoachInfo: CoachInfo = {
-    specialization: [],
-    experience: '',
-    certifications: [],
-    canMessageAthletes: false,
-    verificationStatus: 'pending'
-  };
-
-  const defaultTeamInfo: TeamInfo = {
-    teamName: 'Not specified',
-    sport: 'Not specified',
-    canMessageAthletes: false,
-    achievements: [],
-    roster: [],
-    openPositions: []
-  };
-
-  const defaultSponsorInfo: SponsorInfo = {
-    companyName: 'Not specified',
-    industry: 'Not specified',
-    canMessageAthletes: false,
-    sponsorshipTypes: [],
-    activeOpportunities: []
-  };
-
-  const defaultMediaInfo: MediaInfo = {
-    organization: 'Not specified',
-    canMessageAthletes: false,
-    coverageAreas: [],
-    mediaType: []
-  };
-
-  const convertAuthUserToProfile = (authUser: FirebaseUser): UserProfile => {
-    const profile: UserProfile = {
-      uid: authUser.uid,
-      email: authUser.email || '',
-      displayName: authUser.displayName || '',
-      userType: 'athlete' as UserType,
-      photoURL: authUser.photoURL || undefined,
-      bio: '',
-      location: '',
-      verified: false,
-      verificationStatus: 'none',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      socialLinks: defaultSocialLinks,
-      privacySettings: defaultPrivacySettings,
-      athleteInfo: defaultAthleteInfo,
-      followers: [],
-      following: [],
-      connections: []
-    };
-
-    return profile;
-  };
-
-  const [profileData, setProfileData] = useState<UserProfile | null>(null);
-
+  // Add cleanup effect for mounted ref
   useEffect(() => {
-    console.log('Profile useEffect - user:', user);
-    console.log('Profile useEffect - profileData:', profileData);
-    console.log('Profile useEffect - reduxProfile:', reduxProfile);
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
-    let isMounted = true;
+  console.log('Profile Component - Initial Render:', {
+    urlId: id,
+    currentUserId: user?.uid,
+    hasReduxProfile: !!profile,
+    loading
+  });
 
+  // Effect to handle profile data loading
+  useEffect(() => {
     const fetchProfileData = async (): Promise<void> => {
       try {
-        console.log('Fetching profile for user');
-        setLoading(true);
-        setError(null);
+        console.log('fetchProfileData - Starting fetch for:', {
+          urlId: id,
+          currentUserId: user?.uid
+        });
 
-        const targetUserId = userId || user?.uid;
-        if (!targetUserId) {
-          throw new Error('No user available');
+        // If no ID in URL and no current user, redirect to login
+        if (!user && !id) {
+          console.log('fetchProfileData - No ID or current user, redirecting to login');
+          navigate('/login');
+          return;
         }
 
-        // If viewing own profile and we have redux profile data, use that
-        if (!userId && reduxProfile) {
-          setProfileData(reduxProfile);
+        // Determine which ID to use
+        const targetUserId = id || user?.uid;
+        console.log('fetchProfileData - Target user ID:', targetUserId);
+
+        if (!targetUserId) {
+          console.log('fetchProfileData - No target user ID available');
+          setError('No user ID available');
           setLoading(false);
           return;
         }
 
-        // Try to get the existing profile
-        const userData = await getUserProfile(targetUserId);
-        console.log('Fetched user data:', userData);
-        
-        if (userData) {
-          if (isMounted) {
-            // Ensure we have the correct structure for athleteInfo with required fields
-            const updatedUserData: UserProfile = {
-              ...userData,
-              athleteInfo: userData.userType === 'athlete' ? {
-                ...userData.athleteInfo,
-                sports: userData.athleteInfo?.sports || [{
-                  sport: '',
-                  position: '',
-                  level: '',
-                  experience: 0,
-                  specialties: [],
-                  achievements: []
-                }],
-                academicInfo: userData.athleteInfo?.academicInfo || {
-                  currentSchool: '',
-                  graduationYear: ''
-                },
-                verificationStatus: userData.athleteInfo?.verificationStatus || 'pending',
-                media: userData.athleteInfo?.media || [],
-                memberships: userData.athleteInfo?.memberships || [],
-                interests: userData.athleteInfo?.interests || [],
-                activities: userData.athleteInfo?.activities || [],
-                awards: userData.athleteInfo?.awards || [],
-                achievements: userData.athleteInfo?.achievements || [],
-                eligibility: userData.athleteInfo?.eligibility || {
-                  isEligible: true
-                },
-                recruitingStatus: userData.athleteInfo?.recruitingStatus || 'open'
-              } : undefined
-            };
-
-            // If viewing own profile, update redux state
-            if (!userId) {
-              dispatch(setProfile(updatedUserData));
-            }
-
-            setProfileData(updatedUserData);
-            setLoading(false);
-          }
-        } else {
-          setError('Profile not found');
-        }
-      } catch (error) {
-        console.error('Error fetching profile:', error);
-        if (isMounted) {
-          setError(error instanceof Error ? error.message : 'Failed to load profile');
-        }
-      } finally {
-        if (isMounted) {
+        // If viewing own profile and we have it in Redux, use that
+        if (!id && profile && profile.uid === user?.uid) {
+          console.log('fetchProfileData - Using Redux profile');
+          setProfileData(profile);
           setLoading(false);
+          return;
         }
+
+        // Otherwise fetch from Firestore
+        console.log('fetchProfileData - Fetching from Firestore');
+        const profileData = await getUserProfile(targetUserId);
+        console.log('fetchProfileData - Profile data received:', profileData);
+
+        if (!profileData) {
+          console.log('fetchProfileData - No profile data found');
+          setError('Profile not found');
+          setLoading(false);
+          return;
+        }
+
+        // Update local state
+        setProfileData(profileData);
+        
+        // If this is the current user's profile, update Redux
+        if (targetUserId === user?.uid) {
+          console.log('fetchProfileData - Updating Redux profile');
+          dispatch(setProfile(profileData));
+        }
+
+        setLoading(false);
+      } catch (error) {
+        console.error('fetchProfileData - Error:', error);
+        setError(error instanceof Error ? error.message : 'Error loading profile');
+        setLoading(false);
       }
     };
 
+    // Reset state when ID changes
+    setLoading(true);
+    setError(null);
+    
+    // Fetch profile data
     fetchProfileData();
+  }, [id, user, profile, dispatch, navigate]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [user, userId, reduxProfile, dispatch]);
-
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number): void => {
+  // Handle tab change
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
+    // Reset posts state when switching to posts tab
+    if (newValue === 1 && !postsLoadedRef.current) {
+      postsLoadedRef.current = true;
+      setPosts([]);
+      setLastVisible(null);
+      setHasMorePosts(true);
+    }
   };
 
-  const handleEditToggle = (): void => {
-    setIsEditing(!isEditing);
-  };
+  // Show loading state
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, p: 3 }}>
+        <Typography variant="h6" color="error">
+          {error}
+        </Typography>
+        <Button variant="contained" onClick={() => navigate('/home')}>
+          Return to Home
+        </Button>
+      </Box>
+    );
+  }
+
+  // Show not found state
+  if (!profileData) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, p: 3 }}>
+        <Typography variant="h6">
+          Profile not found
+        </Typography>
+        <Button variant="contained" onClick={() => navigate('/home')}>
+          Return to Home
+        </Button>
+      </Box>
+    );
+  }
 
   const handleProfileUpdate = async (updatedData: Partial<UserProfile>) => {
     if (!profileData) return;
 
-    const newProfileData: UserProfile = {
-      ...profileData,
-      ...updatedData,
-      updatedAt: new Date().toISOString()
-    };
-
     try {
+      // Only update Firestore and exit edit mode if Save button is clicked
+      if (!isEditing) return;
+
+      const newProfileData: UserProfile = {
+        ...profileData,
+        ...updatedData,
+        updatedAt: new Date().toISOString()
+      };
+
       await updateUserProfile(newProfileData.uid, newProfileData);
       setProfileData(newProfileData);
-      setIsEditing(false);
+      // Don't set isEditing to false here - let the Save button handle that
     } catch (error) {
       console.error('Error updating profile:', error);
+      enqueueSnackbar('Failed to update profile', { variant: 'error' });
     }
   };
 
-  const handleAthleteInfoChange = (field: keyof AthleteInfo, value: any): void => {
-    if (!profileData || profileData.userType !== 'athlete') return;
-
-    const currentInfo = profileData.athleteInfo || defaultAthleteInfo;
-
-    if (field === 'academicInfo') {
-      handleProfileUpdate({
-        athleteInfo: {
-          ...currentInfo,
-          academicInfo: {
-            ...currentInfo.academicInfo,
-            ...value
-          }
-        }
-      });
-    } else if (field === 'sports') {
-      handleProfileUpdate({
-        athleteInfo: {
-          ...currentInfo,
-          sports: value
-        }
-      });
-    } else {
-      handleProfileUpdate({
-        athleteInfo: {
-          ...currentInfo,
-          [field]: value
-        }
-      });
-    }
-  };
-
-  const handleSportChange = (sport: string): void => {
-    if (!profileData || profileData.userType !== 'athlete') return;
-
-    const currentInfo = profileData.athleteInfo || defaultAthleteInfo;
-
-    handleProfileUpdate({
-      athleteInfo: {
-        ...currentInfo,
-        sports: [{
-          ...currentInfo.sports[0],
-          sport
-        }]
-      }
-    });
-  };
-
-  const handlePositionChange = (position: string): void => {
-    if (!profileData || profileData.userType !== 'athlete') return;
-
-    const currentInfo = profileData.athleteInfo || defaultAthleteInfo;
-
-    handleProfileUpdate({
-      athleteInfo: {
-        ...currentInfo,
-        sports: [{
-          ...currentInfo.sports[0],
-          position
-        }]
-      }
-    });
-  };
-
-  const handleGraduationYearChange = (graduationYear: string): void => {
-    if (!profileData || profileData.userType !== 'athlete') return;
-
-    const currentInfo = profileData.athleteInfo || defaultAthleteInfo;
-
-    handleProfileUpdate({
-      athleteInfo: {
-        ...currentInfo,
-        academicInfo: {
-          ...currentInfo.academicInfo,
-          graduationYear
-        }
-      }
-    });
-  };
-
-  const handleCoachInfoChange = (field: keyof CoachInfo, value: any): void => {
-    if (!profileData || profileData.userType !== 'coach') return;
-
-    const currentInfo = profileData.coachInfo || defaultCoachInfo;
-
-    handleProfileUpdate({
-      coachInfo: {
-        ...currentInfo,
-        [field]: value
-      }
-    });
-  };
-
-  const handleTeamInfoChange = (field: keyof TeamInfo, value: any): void => {
-    if (!profileData || profileData.userType !== 'team') return;
-
-    const currentInfo = profileData.teamInfo || defaultTeamInfo;
-
-    handleProfileUpdate({
-      teamInfo: {
-        ...currentInfo,
-        [field]: value
-      }
-    });
-  };
-
-  const handleSponsorInfoChange = (field: keyof SponsorInfo, value: any): void => {
-    if (!profileData || profileData.userType !== 'sponsor') return;
-
-    const currentInfo = profileData.sponsorInfo || defaultSponsorInfo;
-
-    handleProfileUpdate({
-      sponsorInfo: {
-        ...currentInfo,
-        [field]: value
-      }
-    });
-  };
-
-  const handleMediaInfoChange = (field: keyof MediaInfo, value: any): void => {
-    if (!profileData || profileData.userType !== 'media') return;
-
-    const currentInfo = profileData.mediaInfo || defaultMediaInfo;
-
-    handleProfileUpdate({
-      mediaInfo: {
-        ...currentInfo,
-        [field]: value
-      }
-    });
-  };
-
-  const handleSocialLinkChange = (platform: keyof SocialLinks, value: string) => {
-    if (!profileData) return;
-
-    handleProfileUpdate({
-      socialLinks: {
-        ...profileData.socialLinks,
-        [platform]: value
-      }
-    });
-  };
-
-  const handlePrivacySettingChange = (setting: keyof PrivacySettings, value: boolean | string) => {
-    if (!profileData) return;
-
-    handleProfileUpdate({
-      privacySettings: {
-        ...profileData.privacySettings,
-        [setting]: value
-      }
-    });
-  };
-
-  const handleSocialLinkClick = async (platform: string) => {
-    if (!user) {
-      enqueueSnackbar('Please sign in to link your social media accounts', { variant: 'error' });
-      return;
-    }
-
+  const handleSaveProfile = async () => {
     try {
-      setLoading(true);
-      const { success, cancelled, profileUrl } = await linkSocialAccount(platform, user.uid);
-      
-      if (cancelled) {
-        // User cancelled the popup - no need to show any error message
-        return;
-      }
-      
-      if (success && profileUrl) {
-        // Update local state
-        handleProfileUpdate({
-          socialLinks: {
-            ...profileData!.socialLinks,
-            [platform]: profileUrl
-          }
-        });
-        enqueueSnackbar(`Successfully linked your ${platform} account!`, { variant: 'success' });
-      }
-    } catch (error: any) {
-      console.error('Error linking social account:', error);
-      
-      // For setup instructions (multi-line error messages), use a dialog
-      if (error.message.includes('Authentication provider') && error.message.includes('not enabled')) {
-        // Show setup instructions in a dialog
-        enqueueSnackbar('Provider not enabled. Check console for setup instructions.', { 
-          variant: 'warning',
-          autoHideDuration: 10000,
-        });
-        // Log setup instructions in a formatted way
-        console.log('\n' + error.message);
-      } else {
-        // For other errors, show in snackbar
-        enqueueSnackbar(error.message || `Failed to link ${platform} account`, { 
-          variant: 'error',
-          autoHideDuration: 6000,
-        });
-      }
-    } finally {
-      setLoading(false);
+      if (!profileData) return;
+      await updateUserProfile(profileData.uid, profileData);
+      setIsEditing(false);
+      enqueueSnackbar('Profile updated successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      enqueueSnackbar('Failed to save profile', { variant: 'error' });
     }
+  };
+
+  const handleEditToggle = (): void => {
+    setIsEditing(!isEditing);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video' = 'image'): Promise<void> => {
@@ -766,112 +762,37 @@ const Profile: React.FC = () => {
     navigate('/verify');
   };
 
-  const renderVerificationStatus = () => {
-    if (!profileData) return null;
+  const handleSocialLinkClick = async (platform: string) => {
+    if (!user) {
+      enqueueSnackbar('Please sign in to link your social media accounts', { variant: 'error' });
+      return;
+    }
 
-    const isPending = profileData.verificationStatus === 'pending';
-    const isApproved = profileData.verificationStatus === 'approved';
-    const isRejected = profileData.verificationStatus === 'rejected';
+    try {
+      setLoading(true);
+      const result = await linkSocialAccount(platform, user.uid);
+      
+      if (result.cancelled) {
+        enqueueSnackbar('Social media linking was cancelled', { variant: 'info' });
+        return;
+      }
 
-    return (
-      <Box sx={{ width: '100%' }}>
-        <Paper sx={{ p: 3 }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Box display="flex" alignItems="center">
-              <Verified 
-                color={isApproved ? "primary" : "action"} 
-                sx={{ mr: 1 }} 
-              />
-              <Box>
-                <Typography variant="h6">Verification Status</Typography>
-                <Typography variant="body2" color="textSecondary">
-                  {isPending && "Your verification request is being reviewed"}
-                  {isApproved && "Your profile is verified"}
-                  {isRejected && "Your verification request was rejected"}
-                  {profileData.verificationStatus === 'none' && "Request verification to get a blue checkmark"}
-                </Typography>
-              </Box>
-            </Box>
-            {!isApproved && (
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<Verified />}
-                onClick={handleVerificationRequest}
-                disabled={isPending}
-              >
-                {isPending ? 'Pending Review' : 'Request Verification'}
-              </Button>
-            )}
-          </Box>
-        </Paper>
-      </Box>
-    );
-  };
+      if (result.success) {
+        // Update social links in the profile
+        const updatedSocialLinks = {
+          ...profileData?.socialLinks,
+          [platform]: result.profileUrl
+        };
 
-  const renderSocialLinks = (): JSX.Element => {
-    if (!profileData?.socialLinks) return <></>;
-
-    return (
-      <>
-        {Object.entries(profileData.socialLinks).map(([platform, url]) => (
-          <ListItem key={platform}>
-            <ListItemAvatar>
-              <IconButton 
-                onClick={() => handleSocialLinkClick(platform)}
-                sx={{ 
-                  '&:hover': { 
-                    transform: 'scale(1.1)',
-                    transition: 'transform 0.2s'
-                  } 
-                }}
-                disabled={loading}
-              >
-                <Avatar sx={{ 
-                  bgcolor: url ? 'success.main' : 'primary.main',
-                  opacity: loading ? 0.7 : 1
-                }}>
-                  {loading ? (
-                    <CircularProgress size={24} color="inherit" />
-                  ) : (
-                    <>
-                      {platform === 'instagram' && <Instagram />}
-                      {platform === 'twitter' && <Twitter />}
-                      {platform === 'linkedin' && <LinkedIn />}
-                    </>
-                  )}
-                </Avatar>
-              </IconButton>
-            </ListItemAvatar>
-            <ListItemText
-              primary={
-                <Box display="flex" alignItems="center">
-                  <Typography>
-                    {platform.charAt(0).toUpperCase() + platform.slice(1)}
-                  </Typography>
-                  {url && (
-                    <Tooltip title="Account linked">
-                      <Check sx={{ ml: 1, color: 'success.main', fontSize: 16 }} />
-                    </Tooltip>
-                  )}
-                </Box>
-              }
-              secondary={
-                <Typography variant="body2" color="textSecondary">
-                  {url ? (
-                    <Link href={url} target="_blank" rel="noopener noreferrer">
-                      View Profile
-                    </Link>
-                  ) : (
-                    'Click icon to link account'
-                  )}
-                </Typography>
-              }
-            />
-          </ListItem>
-        ))}
-      </>
-    );
+        await updateSocialLinks(user.uid, updatedSocialLinks);
+        enqueueSnackbar('Social media account linked successfully', { variant: 'success' });
+      }
+    } catch (error) {
+      console.error('Error linking social account:', error);
+      enqueueSnackbar('Failed to link social media account', { variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const renderProfilePictureUpload = (): JSX.Element | null => {
@@ -913,213 +834,111 @@ const Profile: React.FC = () => {
     );
   };
 
-  const renderVideoUpload = (): JSX.Element | null => {
-    if (!profileData || profileData.userType !== 'athlete' || !profileData.athleteInfo) return null;
+  const renderSocialLinks = (): JSX.Element => {
+    if (!profileData?.socialLinks) return <></>;
 
     return (
-      <Box>
-        <Typography variant="h6" gutterBottom>Highlights / Videos</Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-          {(profileData.athleteInfo.achievements || []).map((videoUrl: string, index: number) => (
-            <Box key={index} sx={{ width: { xs: '100%', sm: '45%', md: '30%' } }}>
-              <Card>
-                <CardMedia
-                  component="video"
-                  controls
-                  src={videoUrl}
-                  sx={{ height: 200 }}
-                />
-                {isEditing && (
-                  <CardActions>
-                    <Button
-                      size="small"
-                      color="error"
-                      onClick={() => {
-                        if (profileData.athleteInfo) {
-                          const achievements = [...(profileData.athleteInfo.achievements || [])];
-                          achievements.splice(index, 1);
-                          handleProfileUpdate({
-                            athleteInfo: {
-                              ...profileData.athleteInfo,
-                              achievements,
-                            },
-                          });
-                        }
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  </CardActions>
-                )}
-              </Card>
-            </Box>
-          ))}
-          {isEditing && (!profileData.athleteInfo.achievements || profileData.athleteInfo.achievements.length < 5) && (
-            <Box sx={{ width: { xs: '100%', sm: '45%', md: '30%' } }}>
-              <Card
-                sx={{
-                  height: 200,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  bgcolor: 'action.hover',
+      <>
+        {Object.entries(profileData.socialLinks).map(([platform, url]) => (
+          <ListItem key={platform}>
+            <ListItemAvatar>
+              <IconButton 
+                onClick={() => handleSocialLinkClick(platform)}
+                sx={{ 
+                  '&:hover': { 
+                    transform: 'scale(1.1)',
+                    transition: 'transform 0.2s'
+                  } 
                 }}
-                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
               >
-                <Box
-                  sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 1,
-                  }}
-                >
-                  <VideoLibrary fontSize="large" />
-                  <Typography>Add Video</Typography>
+                <Avatar sx={{ 
+                  bgcolor: url ? 'success.main' : 'primary.main',
+                  opacity: loading ? 0.7 : 1
+                }}>
+                  {loading ? (
+                    <CircularProgress size={24} color="inherit" />
+                  ) : (
+                    <>
+                      {platform === 'instagram' && <InstagramIcon />}
+                      {platform === 'twitter' && <TwitterIcon />}
+                      {platform === 'linkedin' && <LinkedInIcon />}
+                    </>
+                  )}
+                </Avatar>
+              </IconButton>
+            </ListItemAvatar>
+            <ListItemText
+              primary={
+                <Box display="flex" alignItems="center">
+                  <Typography>
+                    {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                  </Typography>
+                  {url && (
+                    <Tooltip title="Account linked">
+                      <Check sx={{ ml: 1, color: 'success.main', fontSize: 16 }} />
+                    </Tooltip>
+                  )}
                 </Box>
-              </Card>
+              }
+              secondary={
+                <Typography variant="body2" color="textSecondary">
+                  {url ? (
+                    <Link href={url} target="_blank" rel="noopener noreferrer">
+                      View Profile
+                    </Link>
+                  ) : (
+                    'Click icon to link account'
+                  )}
+                </Typography>
+              }
+            />
+          </ListItem>
+        ))}
+      </>
+    );
+  };
+
+  const renderVerificationStatus = () => {
+    if (!profileData) return null;
+
+    const isPending = profileData.verificationStatus === 'pending';
+    const isApproved = profileData.verificationStatus === 'approved';
+    const isRejected = profileData.verificationStatus === 'rejected';
+
+    return (
+      <Box sx={{ width: '100%' }}>
+        <Paper sx={{ p: 3 }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Box display="flex" alignItems="center">
+              <Verified 
+                color={isApproved ? "primary" : "action"} 
+                sx={{ mr: 1 }} 
+              />
+              <Box>
+                <Typography variant="h6">Verification Status</Typography>
+                <Typography variant="body2" color="textSecondary">
+                  {isPending && "Your verification request is being reviewed"}
+                  {isApproved && "Your profile is verified"}
+                  {isRejected && "Your verification request was rejected"}
+                  {profileData.verificationStatus === 'none' && "Request verification to get a blue checkmark"}
+                </Typography>
+              </Box>
             </Box>
-          )}
-        </Box>
+            {!isApproved && (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<Verified />}
+                onClick={handleVerificationRequest}
+                disabled={isPending}
+              >
+                {isPending ? 'Pending Review' : 'Request Verification'}
+              </Button>
+            )}
+          </Box>
+        </Paper>
       </Box>
-    );
-  };
-
-  const renderAthleteFields = (): JSX.Element | null => {
-    if (!profileData || profileData.userType !== 'athlete') return null;
-
-    const athleteInfo = profileData.athleteInfo || defaultAthleteInfo;
-
-    return (
-      <List>
-        <ListItem>
-          <ListItemText
-            primary="Sport & Position"
-            secondary={isEditing ? (
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  size="small"
-                  value={athleteInfo.sports[0].sport}
-                  onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], sport: e.target.value }])}
-                  placeholder="Sport"
-                  sx={{ flex: 1 }}
-                />
-                <TextField
-                  size="small"
-                  value={athleteInfo.sports[0].position}
-                  onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], position: e.target.value }])}
-                  placeholder="Position"
-                  sx={{ flex: 1 }}
-                />
-              </Box>
-            ) : `${athleteInfo.sports[0].sport} - ${athleteInfo.sports[0].position || 'Not specified'}`}
-          />
-        </ListItem>
-        <ListItem>
-          <ListItemText
-            primary="Graduation Year"
-            secondary={isEditing ? (
-              <TextField
-                fullWidth
-                size="small"
-                value={athleteInfo.academicInfo.graduationYear || ''}
-                onChange={(e) => handleAthleteInfoChange('academicInfo', { ...athleteInfo.academicInfo, graduationYear: e.target.value })}
-              />
-            ) : athleteInfo.academicInfo.graduationYear || 'Not specified'}
-          />
-        </ListItem>
-        <ListItem>
-          <ListItemText
-            primary="Stats"
-            secondary={isEditing ? (
-              <TextField
-                fullWidth
-                size="small"
-                multiline
-                rows={3}
-                value={Object.entries(athleteInfo.stats || {}).map(([key, value]) => `${key}: ${value}`).join('\n')}
-                onChange={(e) => {
-                  const stats: Record<string, string> = {};
-                  e.target.value.split('\n').forEach(line => {
-                    const [key, value] = line.split(':').map(s => s.trim());
-                    if (key && value) {
-                      stats[key] = value;
-                    }
-                  });
-                  handleAthleteInfoChange('stats', stats);
-                }}
-                placeholder="Enter stats in key: value format, one per line"
-              />
-            ) : Object.entries(athleteInfo.stats || {}).map(([key, value]) => (
-              <div key={key}>{key}: {value}</div>
-            ))}
-          />
-        </ListItem>
-      </List>
-    );
-  };
-
-  const renderCoachFields = (): JSX.Element | null => {
-    if (!profileData || profileData.userType !== 'coach') return null;
-
-    const coachInfo = profileData.coachInfo || defaultCoachInfo;
-
-    return (
-      <List>
-        <ListItem>
-          <ListItemText
-            primary="Specialization & Experience"
-            secondary={isEditing ? (
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  size="small"
-                  value={coachInfo.specialization.join(', ')}
-                  onChange={(e) => handleCoachInfoChange('specialization', e.target.value.split(',').map(s => s.trim()))}
-                  placeholder="Specialization (comma separated)"
-                  sx={{ flex: 1 }}
-                />
-                <TextField
-                  size="small"
-                  value={coachInfo.experience || ''}
-                  onChange={(e) => handleCoachInfoChange('experience', e.target.value)}
-                  placeholder="Years of Experience"
-                  sx={{ flex: 1 }}
-                />
-              </Box>
-            ) : `${coachInfo.specialization.join(', ')} - ${coachInfo.experience || 'Not specified'}`}
-          />
-        </ListItem>
-        <ListItem>
-          <ListItemText
-            primary="Current Team"
-            secondary={isEditing ? (
-              <TextField
-                fullWidth
-                size="small"
-                value={coachInfo.currentTeam || ''}
-                onChange={(e) => handleCoachInfoChange('currentTeam', e.target.value)}
-              />
-            ) : coachInfo.currentTeam || 'Not specified'}
-          />
-        </ListItem>
-        <ListItem>
-          <ListItemText
-            primary="Certifications"
-            secondary={isEditing ? (
-              <TextField
-                fullWidth
-                size="small"
-                multiline
-                rows={2}
-                value={coachInfo.certifications?.join('\n') || ''}
-                onChange={(e) => handleCoachInfoChange('certifications', e.target.value.split('\n').map(s => s.trim()))}
-                placeholder="Enter certifications, one per line"
-              />
-            ) : coachInfo.certifications?.join(', ') || 'Not specified'}
-          />
-        </ListItem>
-      </List>
     );
   };
 
@@ -1209,64 +1028,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  if (loading) {
-    console.log('Showing loading state');
-    return (
-      <>
-        <Header />
-        <Container maxWidth="lg" sx={{ mt: 10, mb: 4 }}>
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: '50vh',
-              gap: 2,
-            }}
-          >
-            <CircularProgress size={40} />
-            <Typography variant="h6" color="textSecondary">
-              Loading profile...
-            </Typography>
-          </Box>
-        </Container>
-      </>
-    );
-  }
-
-  if (error || !profileData) {
-    console.log('Showing error state - error:', error);
-    console.log('Showing error state - profileData:', profileData);
-    return (
-      <>
-        <Header />
-        <Container maxWidth="lg" sx={{ mt: 10, mb: 4 }}>
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: '50vh',
-              gap: 2,
-            }}
-          >
-            <Typography variant="h6" color="error">
-              {error || 'Profile not found'}
-            </Typography>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/home')}
-            >
-              Return to Home
-            </Button>
-          </Box>
-        </Container>
-      </>
-    );
-  }
-
   console.log('Rendering profile with data:', profileData);
 
   // Don't show connect/follow buttons if viewing own profile
@@ -1280,11 +1041,14 @@ const Profile: React.FC = () => {
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography variant="h6">About</Typography>
             {!isEditing ? (
-              <IconButton onClick={handleEditToggle}>
+              <IconButton onClick={() => setIsEditing(true)}>
                 <EditIcon />
               </IconButton>
             ) : (
-              <IconButton onClick={() => handleProfileUpdate({})} color="primary">
+              <IconButton onClick={() => {
+                handleProfileUpdate(profileData);
+                setIsEditing(false);
+              }} color="primary">
                 <SaveIcon />
               </IconButton>
             )}
@@ -1346,47 +1110,46 @@ const Profile: React.FC = () => {
     </Box>
   );
 
-  const renderPostsTab = (): JSX.Element => (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h6">My Posts</Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-        >
-          New Post
-        </Button>
-      </Box>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-        {mockPosts.map((post) => (
-          <Box key={post.id} sx={{ width: { xs: '100%', sm: '45%' } }}>
-            <Card>
-              <CardMedia
-                component="img"
-                height="200"
-                image={post.media}
-                alt={post.caption}
-              />
-              <CardContent>
-                <Typography variant="body2" color="text.secondary">
-                  {post.caption}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  ❤️ {post.likes} 💬 {post.comments}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  );
+  const renderPostsTab = (): JSX.Element => {
+    const currentUserId = id || user?.uid;
+    if (!currentUserId) {
+      return (
+        <Box textAlign="center" my={4}>
+          <Typography variant="h6" color="text.secondary">
+            Please sign in to view posts
+          </Typography>
+        </Box>
+      );
+    }
+    
+    return (
+      <PostsTab
+        userId={currentUserId}
+        isOwnProfile={currentUserId === user?.uid}
+        userType={profileData.userType}
+        loading={postsLoading}
+        setLoading={setPostsLoading}
+        hasMorePosts={hasMorePosts}
+        setHasMorePosts={setHasMorePosts}
+        editPost={editPost}
+        setEditPost={setEditPost}
+        showDeleteDialog={showDeleteDialog}
+        setShowDeleteDialog={setShowDeleteDialog}
+        selectedPost={selectedPost}
+        setSelectedPost={setSelectedPost}
+        posts={posts}
+        setPosts={setPosts}
+        lastVisible={lastVisible}
+        setLastVisible={setLastVisible}
+      />
+    );
+  };
 
   const renderEventsTab = (): JSX.Element => (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h6">Events</Typography>
-        {profileData.userType !== 'athlete' && (
+        {profileData?.userType !== 'athlete' && (
           <Button
             variant="contained"
             startIcon={<Add />}
@@ -1395,30 +1158,10 @@ const Profile: React.FC = () => {
           </Button>
         )}
       </Box>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-        {mockEvents.map((event) => (
-          <Box key={event.id} sx={{ width: { xs: '100%', md: '48%' } }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6">{event.title}</Typography>
-                <Typography color="textSecondary">
-                  📅 {event.date}
-                </Typography>
-                <Typography color="textSecondary">
-                  📍 {event.location}
-                </Typography>
-                <Typography color="textSecondary">
-                  👥 {event.attendees} attendees
-                </Typography>
-                <Box mt={2}>
-                  <Button variant="outlined" size="small">
-                    View Details
-                  </Button>
-                </Box>
-              </CardContent>
-            </Card>
-          </Box>
-        ))}
+      <Box textAlign="center" my={4}>
+        <Typography variant="body1" color="text.secondary">
+          No events available
+        </Typography>
       </Box>
     </Box>
   );
@@ -1429,54 +1172,31 @@ const Profile: React.FC = () => {
         <Box sx={{ width: { xs: '100%', md: '31%' } }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>Connected</Typography>
-            <List>
-              {mockConnections.map((connection) => (
-                <ListItem key={connection.id}>
-                  <ListItemIcon>
-                    <Avatar>{connection.avatar}</Avatar>
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={
-                      <Box display="flex" alignItems="center">
-                        <Link
-                          component={RouterLink}
-                          to={`/view-profile/${connection.id}`}
-                          sx={{ textDecoration: 'none', color: 'inherit' }}
-                        >
-                          {connection.name}
-                        </Link>
-                        {connection.isVerified && (
-                          <Verified color="primary" sx={{ ml: 1, fontSize: 16 }} />
-                        )}
-                      </Box>
-                    }
-                    secondary={connection.role}
-                  />
-                  <IconButton size="small">
-                    <Message />
-                  </IconButton>
-                  <IconButton size="small" color="error">
-                    <PersonRemove />
-                  </IconButton>
-                </ListItem>
-              ))}
-            </List>
+            <Box textAlign="center" my={4}>
+              <Typography variant="body1" color="text.secondary">
+                No connections yet
+              </Typography>
+            </Box>
           </Paper>
         </Box>
         <Box sx={{ width: { xs: '100%', md: '31%' } }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>Followers</Typography>
-            <List>
-              {/* Similar list for followers with view profile links */}
-            </List>
+            <Box textAlign="center" my={4}>
+              <Typography variant="body1" color="text.secondary">
+                No followers yet
+              </Typography>
+            </Box>
           </Paper>
         </Box>
         <Box sx={{ width: { xs: '100%', md: '31%' } }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>Following</Typography>
-            <List>
-              {/* Similar list for following with view profile links */}
-            </List>
+            <Box textAlign="center" my={4}>
+              <Typography variant="body1" color="text.secondary">
+                Not following anyone yet
+              </Typography>
+            </Box>
           </Paper>
         </Box>
       </Box>
@@ -1526,6 +1246,157 @@ const Profile: React.FC = () => {
       default:
         return null;
     }
+  };
+
+  const renderAthleteFields = (): JSX.Element | null => {
+    if (!profileData || profileData.userType !== 'athlete') return null;
+
+    const athleteInfo = profileData.athleteInfo || defaultAthleteInfo;
+
+    return (
+      <Box sx={{ width: '100%' }}>
+        <Typography variant="h6" gutterBottom>Athletic Information</Typography>
+        <Grid container spacing={3}>
+          {/* Sports & Position */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" gutterBottom>Primary Sport</Typography>
+              {isEditing ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Sport"
+                    value={athleteInfo.sports[0].sport}
+                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], sport: e.target.value }])}
+                  />
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Position"
+                    value={athleteInfo.sports[0].position}
+                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], position: e.target.value }])}
+                  />
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Level"
+                    value={athleteInfo.sports[0].level}
+                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], level: e.target.value }])}
+                  />
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    label="Years of Experience"
+                    value={athleteInfo.sports[0].experience}
+                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], experience: Number(e.target.value) }])}
+                  />
+                </Box>
+              ) : (
+                <List dense>
+                  <ListItem>
+                    <ListItemText primary="Sport" secondary={athleteInfo.sports[0].sport || 'Not specified'} />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemText primary="Position" secondary={athleteInfo.sports[0].position || 'Not specified'} />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemText primary="Level" secondary={athleteInfo.sports[0].level || 'Not specified'} />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemText primary="Experience" secondary={`${athleteInfo.sports[0].experience || 0} years`} />
+                  </ListItem>
+                </List>
+              )}
+            </Paper>
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  };
+
+  const handleAthleteInfoChange = (field: keyof AthleteInfo, value: any): void => {
+    if (!profileData || profileData.userType !== 'athlete') return;
+
+    const currentInfo = profileData.athleteInfo || defaultAthleteInfo;
+
+    if (field === 'academicInfo') {
+      setProfileData({
+        ...profileData,
+        athleteInfo: {
+          ...currentInfo,
+          academicInfo: {
+            ...currentInfo.academicInfo,
+            ...value
+          }
+        }
+      });
+    } else if (field === 'sports') {
+      setProfileData({
+        ...profileData,
+        athleteInfo: {
+          ...currentInfo,
+          sports: value
+        }
+      });
+    } else {
+      setProfileData({
+        ...profileData,
+        athleteInfo: {
+          ...currentInfo,
+          [field]: value
+        }
+      });
+    }
+  };
+
+  const renderCoachFields = (): JSX.Element | null => {
+    if (!profileData || profileData.userType !== 'coach') return null;
+
+    const coachInfo = profileData.coachInfo || defaultCoachInfo;
+
+    return (
+      <List>
+        <ListItem>
+          <ListItemText
+            primary="Specialization & Experience"
+            secondary={isEditing ? (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  size="small"
+                  value={coachInfo.specialization.join(', ')}
+                  onChange={(e) => handleCoachInfoChange('specialization', e.target.value.split(',').map(s => s.trim()))}
+                  placeholder="Specialization (comma separated)"
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  size="small"
+                  value={coachInfo.experience || ''}
+                  onChange={(e) => handleCoachInfoChange('experience', e.target.value)}
+                  placeholder="Years of Experience"
+                  sx={{ flex: 1 }}
+                />
+              </Box>
+            ) : `${coachInfo.specialization.join(', ')} - ${coachInfo.experience || 'Not specified'}`}
+          />
+        </ListItem>
+      </List>
+    );
+  };
+
+  const handleCoachInfoChange = (field: keyof CoachInfo, value: any): void => {
+    if (!profileData || profileData.userType !== 'coach') return;
+
+    const currentInfo = profileData.coachInfo || defaultCoachInfo;
+
+    setProfileData({
+      ...profileData,
+      coachInfo: {
+        ...currentInfo,
+        [field]: value
+      }
+    });
   };
 
   return (
@@ -1604,7 +1475,9 @@ const Profile: React.FC = () => {
               </Box>
             </TabPanel>
             <TabPanel value={activeTab} index={1}>
-              {renderPostsTab()}
+              <React.Suspense fallback={<CircularProgress />}>
+                <PostsTab {...postsTabProps} />
+              </React.Suspense>
             </TabPanel>
             <TabPanel value={activeTab} index={2}>
               {renderEventsTab()}

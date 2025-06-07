@@ -177,6 +177,7 @@ export interface UserProfile {
   followers: string[];
   following: string[];
   connections: string[];
+  matchScore?: number;
   // Role-specific information
   athleteInfo?: AthleteInfo;
   coachInfo?: CoachInfo;

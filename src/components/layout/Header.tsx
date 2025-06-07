@@ -32,6 +32,7 @@ import { User } from '../../types/user';
 import { auth } from '../../config/firebase';
 import { signOut } from 'firebase/auth';
 import { clearUser } from '../../store/slices/authSlice';
+import UnreadMessagesBadge from '../UnreadMessagesBadge';
 
 const Search = styled('div')(({ theme }) => ({
   position: 'relative',
@@ -111,17 +112,28 @@ const Header = () => {
 
   const handleProfileClick = () => {
     handleMenuClose();
-    if (user) {
-      navigate(`/profile/${user.uid}`);
+    console.log('Header - Profile click - User:', user);
+    
+    if (user?.uid) {
+      const profileUrl = `/profile/${user.uid}`;
+      console.log('Header - Navigating to profile URL:', profileUrl);
+      navigate(profileUrl);
+    } else {
+      console.log('Header - No user ID available for profile navigation');
+      navigate('/login');
     }
-  };
-
-  const handleDashboardClick = () => {
-    navigate('/home');
   };
 
   const handleHomeClick = () => {
     navigate('/');
+  };
+
+  const handleMessagesClick = () => {
+    navigate('/messages');
+  };
+
+  const handleDashboardClick = () => {
+    navigate('/home');
   };
 
   return (
@@ -139,7 +151,7 @@ const Header = () => {
           </IconButton>
         )}
 
-        <IconButton color="inherit" onClick={() => navigate('/home')}>
+        <IconButton color="inherit" onClick={handleHomeClick}>
           <HomeIcon />
         </IconButton>
 
@@ -170,10 +182,12 @@ const Header = () => {
               <Notifications />
             </Badge>
           </IconButton>
-          <IconButton color="inherit">
-            <Badge badgeContent={3} color="error">
-              <Message />
-            </Badge>
+          <IconButton 
+            size="large" 
+            color="inherit"
+            onClick={handleMessagesClick}
+          >
+            <UnreadMessagesBadge />
           </IconButton>
           <IconButton
             edge="end"
@@ -337,11 +351,9 @@ const Header = () => {
           </IconButton>
           Notifications
         </MenuItem>
-        <MenuItem>
+        <MenuItem onClick={handleMessagesClick}>
           <IconButton color="inherit">
-            <Badge badgeContent={3} color="error">
-              <Message />
-            </Badge>
+            <UnreadMessagesBadge />
           </IconButton>
           Messages
         </MenuItem>

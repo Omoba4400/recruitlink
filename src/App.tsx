@@ -1,19 +1,25 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { RootState } from './store';
+import { RootState } from './store/store';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db } from './config/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import Messages from './pages/Messages';
+import MiniChatContainer, { MiniChatContainerRef } from './components/chat/MiniChatContainer';
+import Header from './components/layout/Header';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Home from './pages/Home';
+import Profile from './pages/Profile';
+import ViewProfile from './pages/ViewProfile';
+import Settings from './pages/Settings';
 import { User } from './types/user';
 import { Box, CircularProgress, Typography } from '@mui/material';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AdminAuthProvider } from './contexts/AdminAuthContext';
 import { SnackbarProvider } from 'notistack';
-import Home from './pages/Home';
 import Landing from './pages/Landing';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Profile from './pages/Profile';
-import ViewProfile from './pages/ViewProfile';
-import Settings from './pages/Settings';
 import VerificationPending from './pages/VerificationPending';
 import PrivateRoute from './routes/PrivateRoute';
 import FirebaseInit from './components/FirebaseInit';
@@ -21,31 +27,22 @@ import VerificationForm from './components/verification/VerificationForm';
 import VerificationDashboard from './pages/admin/VerificationDashboard';
 import AdminRoute from './components/routes/AdminRoute';
 import AdminRoutes from './routes/admin.routes';
+import PostView from './pages/PostView';
+import { supabase } from './config/supabase';
 
 // Protected Route component
-const ProtectedRoute = ({ children, requiredRole, adminRequired = false }: { 
-  children: React.ReactNode, 
-  requiredRole?: User['userType'],
-  adminRequired?: boolean 
-}) => {
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const user = useSelector((state: RootState) => state.auth.user);
   
   if (!user) {
-    return <Navigate to={adminRequired ? "/admin/login" : "/login"} replace />;
-  }
-
-  if (adminRequired && !user.isAdmin) {
-    return <Navigate to="/home" replace />;
-  }
-
-  if (requiredRole && user.userType !== requiredRole) {
-    return <Navigate to="/home" replace />;
+    return <Navigate to="/login" replace />;
   }
   
   return <>{children}</>;
 };
 
-const App = () => {
+const App: React.FC = () => {
+  const chatContainerRef = useRef<MiniChatContainerRef>(null);
   const user = useSelector((state: RootState) => state.auth.user);
   const emailVerified = useSelector((state: RootState) => state.auth.emailVerified);
   const initializing = useSelector((state: RootState) => state.auth.initializing);
@@ -55,8 +52,63 @@ const App = () => {
   console.log('App render - initializing:', initializing);
   console.log('App render - loading:', loading);
 
+  // Update user's online status
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const userStatusRef = doc(db, 'status', user.uid);
+    
+    const updateOnlineStatus = async (status: boolean) => {
+      try {
+        await setDoc(userStatusRef, {
+          online: status,
+          lastSeen: serverTimestamp(),
+          userId: user.uid // Add userId field for security rules
+        }, { merge: true });
+      } catch (error) {
+        console.error('Error updating online status:', error);
+      }
+    };
+
+    // Update when app loads
+    updateOnlineStatus(true);
+
+    // Update when user closes/leaves the page
+    const onUnload = () => {
+      updateOnlineStatus(false);
+    };
+
+    window.addEventListener('beforeunload', onUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', onUnload);
+      updateOnlineStatus(false);
+    };
+  }, [user]);
+
+  const testSupabaseConnection = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .limit(1);
+      
+      if (error) {
+        console.error('Supabase error:', error);
+      } else {
+        console.log('Supabase connection successful:', data);
+      }
+    } catch (err) {
+      console.error('Connection test error:', err);
+    }
+  };
+
+  useEffect(() => {
+    testSupabaseConnection();
+  }, []);
+
   const renderContent = () => {
-    if (initializing || loading) {
+    if (initializing) {
       return (
         <Box
           sx={{
@@ -70,7 +122,7 @@ const App = () => {
         >
           <CircularProgress />
           <Typography variant="body1" color="textSecondary">
-            {initializing ? 'Initializing...' : 'Loading...'}
+            Initializing...
           </Typography>
         </Box>
       );
@@ -148,15 +200,17 @@ const App = () => {
           }
         />
 
-        {/* Other protected routes */}
+        {/* Post routes */}
         <Route
-          path="/profile"
+          path="/post/:postId"
           element={
             <PrivateRoute>
-              <Profile />
+              <PostView />
             </PrivateRoute>
           }
         />
+
+        {/* Other protected routes */}
         <Route
           path="/profile/:userId"
           element={
@@ -166,23 +220,19 @@ const App = () => {
           }
         />
         <Route
+          path="/view-profile/:userId"
+          element={
+            <PrivateRoute>
+              <ViewProfile />
+            </PrivateRoute>
+          }
+        />
+        <Route
           path="/settings"
           element={
             <PrivateRoute>
               <Settings />
             </PrivateRoute>
-          }
-        />
-        <Route
-          path="/profile/:id"
-          element={
-            <ProtectedRoute>
-              {user && !emailVerified ? (
-                <Navigate to="/verify-email" replace />
-              ) : (
-                <ViewProfile />
-              )}
-            </ProtectedRoute>
           }
         />
 
@@ -208,6 +258,20 @@ const App = () => {
           } 
         />
 
+        {/* Messages route */}
+        <Route
+          path="/messages"
+          element={
+            <PrivateRoute>
+              {user && !emailVerified ? (
+                <Navigate to="/verify-email" replace />
+              ) : (
+                <Messages />
+              )}
+            </PrivateRoute>
+          }
+        />
+
         {/* Catch all route */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -215,14 +279,15 @@ const App = () => {
   };
 
   return (
-    <SnackbarProvider maxSnack={3}>
-      <ThemeProvider>
-        <AdminAuthProvider>
+    <ThemeProvider>
+      <AdminAuthProvider>
+        <SnackbarProvider maxSnack={3}>
           <FirebaseInit />
           {renderContent()}
-        </AdminAuthProvider>
-      </ThemeProvider>
-    </SnackbarProvider>
+          {user && <MiniChatContainer ref={chatContainerRef} userId={user.uid} />}
+        </SnackbarProvider>
+      </AdminAuthProvider>
+    </ThemeProvider>
   );
 };
 

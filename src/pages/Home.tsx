@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Container,
@@ -22,6 +22,13 @@ import {
   Tooltip,
   Chip,
   Grid,
+  CircularProgress,
+  Menu,
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Home as HomeIcon,
@@ -39,7 +46,7 @@ import {
   Handshake as HandshakeIcon,
   MonetizationOn as SponsorshipIcon,
   ThumbUp,
-  Comment,
+  Comment as CommentIcon,
   Share,
   EmojiEvents,
   Image,
@@ -57,6 +64,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu as MenuIcon,
+  SendOutlined,
+  EditOutlined,
+  DeleteOutline,
+  AttachFile,
 } from '@mui/icons-material';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
@@ -64,6 +75,16 @@ import Header from '../components/layout/Header';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '@mui/material/styles';
 import { useMediaQuery } from '@mui/material';
+import { getFeed, addReaction, removeReaction, addComment, sharePost, createPost, updatePost, deletePost } from '../services/post.service';
+import type { PostWithAuthor, Comment as PostComment, Reaction, ReactionType } from '../types/post';
+import { useSnackbar } from 'notistack';
+import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { getUserProfile } from '../services/user.service';
+import { getUserSuggestions, connectWithUser } from '../services/user.service';
+import { UserProfile } from '../types/user';
+import { v4 as uuidv4 } from 'uuid';
+import DeleteDialog from '../components/DeleteDialog';
+import { emitPostDeleted } from '../events/postEvents';
 
 // Post Types
 interface Post {
@@ -255,6 +276,26 @@ const mockUsers = {
   },
 };
 
+// Add these type definitions at the top level
+interface PerformanceMetrics {
+  [key: string]: number;
+}
+
+interface AthleteStats {
+  sport: string;
+}
+
+interface AthleteInfo {
+  sports: Array<AthleteStats & {
+    performance?: PerformanceMetrics;
+  }>;
+  activities?: string[];
+}
+
+interface UserInterests {
+  interests: string[];
+}
+
 // Left Sidebar Component
 const LeftSidebar = () => {
   const navigate = useNavigate();
@@ -399,91 +440,428 @@ const LeftSidebar = () => {
 // Main Feed Component
 const MainFeed = () => {
   const user = useSelector((state: RootState) => state.auth.user);
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [postContent, setPostContent] = useState('');
+  const [isPosting, setIsPosting] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState<File[]>([]);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<string | null>(null);
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
+  const [editingPost, setEditingPost] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [showCommentInput, setShowCommentInput] = useState<string | null>(null);
+  const [commentContent, setCommentContent] = useState('');
+  const [posts, setPosts] = useState<PostWithAuthor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { enqueueSnackbar } = useSnackbar();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [commentUsers, setCommentUsers] = useState<Map<string, { displayName: string, photoURL?: string }>>(new Map());
+  const [lastVisible, setLastVisible] = useState<DocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
-    if (user?.userType) {
-      setPosts(roleBasedPosts[user.userType] || []);
-    }
-  }, [user?.userType]);
+    const loadPosts = async () => {
+      if (!user?.uid) {
+        console.error('No user ID available for loading posts');
+        return;
+      }
 
-  const renderPostContent = (post: Post) => {
-    switch (post.type) {
-      case 'performance':
-        return (
-          <Box sx={{ mt: { xs: 3, sm: 2 } }}>
-            <Typography 
-              variant="h6" 
-              color="primary"
-              sx={{ fontSize: { xs: '1.5rem', sm: '1.25rem' } }}
-            >
-              {post.metrics?.value}%
-            </Typography>
-            <Typography 
-              variant="body2" 
-              color="text.secondary"
-              sx={{ fontSize: { xs: '1rem', sm: '0.875rem' } }}
-            >
-              {post.metrics?.label}
-              {post.metrics?.change && (
-                <Chip
-                  label={`${post.metrics.change > 0 ? '+' : ''}${post.metrics.change}%`}
-                  color={post.metrics.change > 0 ? 'success' : 'error'}
-                  size={isMobile ? "medium" : "small"}
-                  sx={{ ml: 1 }}
-                />
-              )}
-            </Typography>
+      try {
+        setLoading(true);
+        console.log('Loading posts for user:', user.uid);
+        const { posts: newPosts, lastVisible: last, hasMore } = await getFeed(user.uid);
+        
+        // Validate posts before setting state
+        const validPosts = newPosts.filter(post => {
+          if (!post.id) {
+            console.error('Invalid post data - missing ID:', post);
+            return false;
+          }
+          if (!post.author?.uid) {
+            console.error('Invalid post data - missing author:', post);
+            return false;
+          }
+          return true;
+        });
+
+        console.log('Loaded valid posts:', validPosts.length);
+        console.log('Post details:', validPosts.map(p => ({ id: p.id, authorId: p.author.uid })));
+        setPosts(validPosts);
+        setLastVisible(last);
+        setHasMore(hasMore);
+      } catch (error) {
+        console.error('Error loading posts:', error);
+        enqueueSnackbar('Failed to load posts. Please try refreshing the page.', { 
+          variant: 'error',
+          autoHideDuration: 5000
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPosts();
+  }, [user?.uid, enqueueSnackbar, posts.length === 0]);
+
+  const renderPostContent = (post: PostWithAuthor) => {
+    const mediaItems = post.media || [];
+    
+    return (
+      <>
+        <Typography 
+          variant="body1" 
+          paragraph
+          sx={{ fontSize: { xs: '1.1rem', sm: '1rem' } }}
+        >
+          {post.content}
+        </Typography>
+        {mediaItems.length > 0 && (
+          <Box sx={{ mt: 2, mb: 2 }}>
+            {mediaItems.map((mediaItem, index) => (
+              <Box
+                key={mediaItem.id}
+                sx={{
+                  width: '100%',
+                  mb: index < mediaItems.length - 1 ? 2 : 0
+                }}
+              >
+                {mediaItem.type === 'video' ? (
+                  <video
+                    controls
+                    style={{
+                      width: '100%',
+                      maxHeight: '500px',
+                      borderRadius: 8,
+                      backgroundColor: '#000'
+                    }}
+                  >
+                    <source src={mediaItem.url} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                ) : (
+                  <img
+                    src={mediaItem.url}
+                    alt={mediaItem.filename || `Post media ${index + 1}`}
+                    style={{
+                      width: '100%',
+                      maxHeight: '500px',
+                      objectFit: 'contain',
+                      borderRadius: 8
+                    }}
+                    loading="lazy"
+                  />
+                )}
+              </Box>
+            ))}
           </Box>
-        );
-      case 'application':
-        return (
-          <Box sx={{ mt: { xs: 3, sm: 2 } }}>
-            <Button 
-              variant="outlined" 
-              size={isMobile ? "large" : "small"} 
-              sx={{ 
-                mr: 1,
-                fontSize: { xs: '1rem', sm: '0.875rem' },
-                py: { xs: 1.5, sm: 1 }
-              }}
-            >
-              View Details
-            </Button>
-            <Button 
-              variant="contained" 
-              size={isMobile ? "large" : "small"}
-              sx={{ 
-                fontSize: { xs: '1rem', sm: '0.875rem' },
-                py: { xs: 1.5, sm: 1 }
-              }}
-            >
-              Take Action
-            </Button>
-          </Box>
-        );
-      default:
-        return (
-          <Typography 
-            variant="body1" 
-            paragraph
-            sx={{ fontSize: { xs: '1.1rem', sm: '1rem' } }}
-          >
-            {post.content}
-          </Typography>
-        );
+        )}
+      </>
+    );
+  };
+
+  const handleReaction = async (postId: string) => {
+    if (!user) {
+      enqueueSnackbar('Please sign in to react to posts', { variant: 'warning' });
+      return;
+    }
+
+    try {
+      const post = posts.find(p => p.id === postId);
+      if (!post) return;
+
+      const existingReaction = post.reactions?.find(r => r.userId === user.uid && r.type === 'like');
+
+      if (existingReaction) {
+        await removeReaction(postId, user.uid);
+        setPosts(prevPosts => prevPosts.map(p => 
+          p.id === postId 
+            ? { ...p, reactions: (p.reactions || []).filter(r => !(r.userId === user.uid && r.type === 'like')) }
+            : p
+        ));
+      } else {
+        await addReaction(postId, user.uid, 'like' as ReactionType);
+        setPosts(prevPosts => prevPosts.map(p => 
+          p.id === postId 
+            ? { ...p, reactions: [...(p.reactions || []), { userId: user.uid, type: 'like' as ReactionType, createdAt: Timestamp.now() }] }
+            : p
+        ));
+      }
+    } catch (error) {
+      console.error('Error handling reaction:', error);
+      enqueueSnackbar('Failed to update reaction', { variant: 'error' });
     }
   };
+
+  const handleAddComment = async (postId: string) => {
+    if (!user || !commentContent.trim()) return;
+
+    try {
+      await addComment(postId, user.uid, commentContent);
+      
+      setPosts(prevPosts => prevPosts.map(p => 
+        p.id === postId 
+          ? { 
+              ...p, 
+              comments: [...p.comments, {
+                id: uuidv4(),
+                userId: user.uid,
+                content: commentContent,
+                createdAt: Timestamp.now(),
+                isEdited: false,
+                reactions: []
+              } as PostComment]
+            }
+          : p
+      ));
+      
+      setCommentContent('');
+      setShowCommentInput(null);
+      enqueueSnackbar('Comment added successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      enqueueSnackbar('Failed to add comment', { variant: 'error' });
+    }
+  };
+
+  const handleShare = async (postId: string) => {
+    if (!user) {
+      enqueueSnackbar('Please sign in to share posts', { variant: 'warning' });
+      return;
+    }
+
+    try {
+      await sharePost(postId);
+      setPosts(prevPosts => prevPosts.map(p => 
+        p.id === postId 
+          ? { ...p, shares: p.shares + 1 }
+          : p
+      ));
+      enqueueSnackbar('Post shared successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error sharing post:', error);
+      enqueueSnackbar('Failed to share post', { variant: 'error' });
+    }
+  };
+
+  const handleMediaSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      const files = Array.from(event.target.files);
+      setSelectedMedia(prevMedia => [...prevMedia, ...files]);
+    }
+  };
+
+  const handleRemoveMedia = (index: number) => {
+    setSelectedMedia(prevMedia => prevMedia.filter((_, i) => i !== index));
+  };
+
+  const handleCreatePost = async () => {
+    if (!user || !postContent.trim()) {
+      enqueueSnackbar('Please enter some content for your post', { variant: 'warning' });
+      return;
+    }
+
+    try {
+      setIsPosting(true);
+      console.log('Creating post with authorId:', user.uid);
+      const postId = await createPost(
+        user.uid,
+        postContent,
+        selectedMedia,
+        'public'
+      );
+
+      // Get the complete user profile
+      const authorProfile = await getUserProfile(user.uid);
+      if (!authorProfile) {
+        throw new Error('Failed to get author profile');
+      }
+
+      console.log('Author profile:', authorProfile);
+
+      // Add the new post to the beginning of the posts array
+      const newPost: PostWithAuthor = {
+        id: postId,
+        content: postContent,
+        reactions: [],
+        comments: [],
+        shares: 0,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        isEdited: false,
+        visibility: 'public' as const,
+        author: authorProfile,
+        media: selectedMedia.map((file, index) => ({
+          id: `${postId}-media-${index}`,
+          type: file.type.startsWith('video/') ? 'video' : 'image',
+          url: URL.createObjectURL(file),
+          path: `posts/${postId}/${file.name}`,
+          filename: file.name
+        }))
+      };
+
+      setPosts(prevPosts => [newPost, ...prevPosts]);
+      setPostContent('');
+      setSelectedMedia([]);
+      enqueueSnackbar('Post created successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error creating post:', error);
+      enqueueSnackbar('Failed to create post', { variant: 'error' });
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
+  const handleEditPost = async (postId: string) => {
+    if (!user) return;
+    
+    try {
+      const post = posts.find(p => p.id === postId);
+      if (!post) return;
+
+      await updatePost(postId, user.uid, { content: editContent });
+      
+      setPosts(prevPosts => prevPosts.map(p => 
+        p.id === postId 
+          ? { ...p, content: editContent, isEdited: true, updatedAt: Timestamp.now() }
+          : p
+      ));
+      
+      setEditingPost(null);
+      setEditContent('');
+      enqueueSnackbar('Post updated successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error updating post:', error);
+      enqueueSnackbar('Failed to update post', { variant: 'error' });
+    }
+  };
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, postId: string) => {
+    if (!postId) {
+      console.error('handleMenuOpen: No post ID provided');
+      enqueueSnackbar('Error: Unable to perform this action', { variant: 'error' });
+      return;
+    }
+    
+    // Verify the post exists in our state
+    const post = posts.find(p => p.id === postId);
+    if (!post) {
+      console.error('handleMenuOpen: Post not found in state:', postId);
+      enqueueSnackbar('Error: Post not found', { variant: 'error' });
+      return;
+    }
+    
+    event.stopPropagation();
+    console.log('handleMenuOpen called with postId:', postId);
+    setSelectedPost(postId);
+    setMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+    setSelectedPost(null);
+  };
+
+  const handleDeleteClick = (postId: string) => {
+    if (!postId) {
+      console.error('handleDeleteClick: No post ID provided');
+      enqueueSnackbar('Error: Unable to delete post', { variant: 'error' });
+      return;
+    }
+
+    // Verify the post exists and user has permission
+    const post = posts.find(p => p.id === postId);
+    if (!post) {
+      console.error('handleDeleteClick: Post not found:', postId);
+      enqueueSnackbar('Error: Post not found', { variant: 'error' });
+      return;
+    }
+
+    if (!user || post.author.uid !== user.uid) {
+      console.error('handleDeleteClick: Unauthorized deletion attempt');
+      enqueueSnackbar('Error: You do not have permission to delete this post', { variant: 'error' });
+      return;
+    }
+
+    console.log('handleDeleteClick called with postId:', postId);
+    setSelectedPost(postId);
+    setShowDeleteDialog(true);
+  };
+
+  const handleConfirmDelete = async (postId: string | null) => {
+    if (!postId) {
+      console.error('No post selected for deletion');
+      return;
+    }
+    console.log('Confirming delete for post:', postId);
+    
+    if (!user?.uid) {
+      console.error('Missing user. User:', user?.uid);
+      enqueueSnackbar('Unable to delete post: User not authenticated', { variant: 'error' });
+      return;
+    }
+
+    try {
+      console.log('Attempting to delete post:', postId, 'by user:', user.uid);
+      const post = posts.find(p => p.id === postId);
+      
+      if (!post) {
+        console.error('Post not found:', postId);
+        enqueueSnackbar('Post not found', { variant: 'error' });
+        return;
+      }
+
+      // Verify ownership before attempting deletion
+      if (post.author.uid !== user.uid) {
+        console.error('Unauthorized deletion attempt. Post author:', post.author.uid, 'User:', user.uid);
+        enqueueSnackbar('You do not have permission to delete this post', { variant: 'error' });
+        return;
+      }
+
+      await deletePost(postId, user.uid);
+      console.log('Post deleted successfully:', postId);
+      
+      // Update local state
+      setPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
+      
+      // Emit post deleted event
+      emitPostDeleted(postId);
+      
+      enqueueSnackbar('Post deleted successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      enqueueSnackbar(error instanceof Error ? error.message : 'Failed to delete post', { variant: 'error' });
+    } finally {
+      setShowDeleteDialog(false);
+      setSelectedPost(null);
+      setMenuAnchorEl(null);
+    }
+  };
+
+  const handleEditClick = (post: PostWithAuthor) => {
+    setEditingPost(post.id);
+    setEditContent(post.content);
+    handleMenuClose();
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box>
       {/* Create Post */}
-      <Paper sx={{ p: { xs: 3, sm: 2 }, mb: 3 }}>
+      <Paper 
+        key="create-post"
+        sx={{ p: { xs: 3, sm: 2 }, mb: 3 }}
+      >
         <Box 
           display="flex" 
-          alignItems="center" 
+          alignItems="flex-start"
           mb={2}
           sx={{
             '& .MuiAvatar-root': {
@@ -493,59 +871,124 @@ const MainFeed = () => {
             }
           }}
         >
-          <Avatar>{user?.displayName?.[0]}</Avatar>
-          <TextField
-            fullWidth
-            placeholder="Share your thoughts..."
-            variant="outlined"
-            size={isMobile ? "medium" : "small"}
-            sx={{
-              '& .MuiInputBase-input': {
-                fontSize: { xs: '1.1rem', sm: '1rem' },
-                py: { xs: 1.5, sm: 1 }
-              }
-            }}
-          />
-        </Box>
-        <Box 
-          display="flex" 
-          justifyContent="space-between"
-          sx={{
-            '& .MuiIconButton-root': {
-              p: { xs: 2, sm: 1 },
-              '& svg': {
-                fontSize: { xs: '1.75rem', sm: '1.5rem' }
-              }
-            }
-          }}
-        >
-          <Box>
-            <IconButton size={isMobile ? "large" : "small"}>
-              <Image />
-            </IconButton>
-            <IconButton size={isMobile ? "large" : "small"}>
-              <VideoLibrary />
-            </IconButton>
-            <IconButton size={isMobile ? "large" : "small"}>
-              <Poll />
-            </IconButton>
-          </Box>
-          <Button 
-            variant="contained" 
-            size={isMobile ? "large" : "small"}
-            sx={{ 
-              px: { xs: 4, sm: 3 },
-              py: { xs: 1.5, sm: 1 },
-              fontSize: { xs: '1.1rem', sm: '0.875rem' }
-            }}
+          <Avatar 
+            src={user?.photoURL} 
+            alt={user?.displayName || 'User'}
+            sx={{ bgcolor: 'primary.main' }}
           >
-            Post
-          </Button>
+            {user?.displayName?.[0]?.toUpperCase()}
+          </Avatar>
+          <Box flex={1}>
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              placeholder={`What's on your mind, ${user?.displayName?.split(' ')[0]}?`}
+              value={postContent}
+              onChange={(e) => setPostContent(e.target.value)}
+              disabled={isPosting}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2
+                }
+              }}
+            />
+            {selectedMedia.length > 0 && (
+              <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {selectedMedia.map((file, index) => (
+                  <Box
+                    key={index}
+                    sx={{
+                      position: 'relative',
+                      width: 100,
+                      height: 100,
+                      borderRadius: 1,
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {file.type.startsWith('image/') ? (
+                      <img
+                        src={URL.createObjectURL(file)}
+                        alt={`Selected media ${index + 1}`}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    ) : (
+                      <video
+                        src={URL.createObjectURL(file)}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    )}
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setSelectedMedia(prev => prev.filter((_, i) => i !== index));
+                      }}
+                      sx={{
+                        position: 'absolute',
+                        top: 4,
+                        right: 4,
+                        bgcolor: 'rgba(0, 0, 0, 0.5)',
+                        color: 'white',
+                        '&:hover': {
+                          bgcolor: 'rgba(0, 0, 0, 0.7)'
+                        }
+                      }}
+                    >
+                      <DeleteOutline fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
+              </Box>
+            )}
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,video/*"
+                  onChange={handleMediaSelect}
+                  style={{ display: 'none' }}
+                  ref={fileInputRef}
+                  disabled={isPosting}
+                />
+                <IconButton
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isPosting}
+                  size={isMobile ? "large" : "medium"}
+                >
+                  <AttachFile />
+                </IconButton>
+              </Box>
+              <Button
+                variant="contained"
+                onClick={handleCreatePost}
+                disabled={!postContent.trim() && selectedMedia.length === 0 || isPosting}
+                sx={{
+                  px: { xs: 4, sm: 3 },
+                  py: { xs: 1.5, sm: 1 },
+                  borderRadius: 2
+                }}
+              >
+                {isPosting ? 'Posting...' : 'Post'}
+              </Button>
+            </Box>
+          </Box>
         </Box>
       </Paper>
 
       {/* Pinned/Announcements Section */}
-      <Paper sx={{ p: 2, mb: 3, bgcolor: 'action.hover' }}>
+      <Paper 
+        key="announcements"
+        sx={{ p: 2, mb: 3, bgcolor: 'action.hover' }}
+      >
         <Box display="flex" alignItems="center" mb={1}>
           <PinDrop color="primary" sx={{ mr: 1 }} />
           <Typography variant="h6">Pinned Announcements</Typography>
@@ -564,132 +1007,161 @@ const MainFeed = () => {
       </Typography>
 
       {/* Posts Feed */}
-      {posts.map((post) => (
-        <Paper key={post.id} sx={{ p: { xs: 3, sm: 2 }, mb: 3 }}>
-          <Box 
-            display="flex" 
-            alignItems="center" 
-            mb={2}
-            sx={{
-              '& .MuiAvatar-root': {
-                width: { xs: 48, sm: 40 },
-                height: { xs: 48, sm: 40 },
-                mr: { xs: 3, sm: 2 }
-              }
-            }}
-          >
-            <Avatar>{post.author.avatar}</Avatar>
-            <Box flex={1}>
-              <Box display="flex" alignItems="center">
-                <Typography 
-                  variant="subtitle1"
-                  sx={{ fontSize: { xs: '1.1rem', sm: '1rem' } }}
-                >
-                  {post.author.name}
-                </Typography>
-                {post.author.role === 'Verified' && (
-                  <Tooltip title="Verified Profile">
-                    <Verified 
-                      color="primary" 
-                      sx={{ 
-                        ml: 0.5, 
-                        fontSize: { xs: '1.25rem', sm: '1rem' } 
-                      }} 
-                    />
-                  </Tooltip>
-                )}
-              </Box>
-              <Typography 
-                variant="body2" 
-                color="text.secondary"
-                sx={{ fontSize: { xs: '1rem', sm: '0.875rem' } }}
-              >
-                {post.timestamp} • {post.author.role}
-              </Typography>
-            </Box>
-            <IconButton 
-              size={isMobile ? "large" : "small"}
-              sx={{
-                p: { xs: 2, sm: 1 },
-                '& svg': {
-                  fontSize: { xs: '1.75rem', sm: '1.5rem' }
-                }
-              }}
+      {posts.length === 0 ? (
+        <Paper 
+          key="no-posts"
+          sx={{ p: 3, textAlign: 'center' }}
+        >
+          <Typography variant="body1" color="text.secondary">
+            No posts to show. Start following people or connect with others to see their updates!
+          </Typography>
+        </Paper>
+      ) : (
+        posts.map((post) => {
+          // Validate post data
+          if (!post?.id || !post?.author?.uid) {
+            console.error('Invalid post data:', post);
+            return null;
+          }
+
+          return (
+            <Paper 
+              key={`post-${post.id}`}
+              sx={{ p: { xs: 3, sm: 2 }, mb: 3 }}
             >
-              <MoreVert />
-            </IconButton>
-          </Box>
-          {renderPostContent(post)}
-          <Box 
-            display="flex" 
-            justifyContent="space-between" 
-            mt={2}
-            sx={{
-              '& .MuiIconButton-root': {
-                p: { xs: 2, sm: 1 },
-                '& svg': {
-                  fontSize: { xs: '1.75rem', sm: '1.5rem' }
-                }
-              }
-            }}
-          >
-            <Box>
-              <IconButton size={isMobile ? "large" : "small"}>
-                <ThumbUp />
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    ml: 1,
-                    fontSize: { xs: '1rem', sm: '0.875rem' }
-                  }}
-                >
-                  {post.likes}
-                </Typography>
-              </IconButton>
-              <IconButton size={isMobile ? "large" : "small"}>
-                <Comment />
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    ml: 1,
-                    fontSize: { xs: '1rem', sm: '0.875rem' }
-                  }}
-                >
-                  {post.comments}
-                </Typography>
-              </IconButton>
-              <IconButton size={isMobile ? "large" : "small"}>
-                <Share />
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    ml: 1,
-                    fontSize: { xs: '1rem', sm: '0.875rem' }
-                  }}
-                >
-                  {post.shares}
-                </Typography>
-              </IconButton>
-            </Box>
-            {post.metrics && (
-              <Chip
-                icon={<Insights />}
-                label={`${post.metrics.value} views`}
-                size={isMobile ? "medium" : "small"}
-                variant="outlined"
+              <Box 
+                display="flex" 
+                alignItems="center" 
+                mb={2}
                 sx={{
-                  '& .MuiChip-label': {
-                    fontSize: { xs: '1rem', sm: '0.875rem' }
+                  '& .MuiAvatar-root': {
+                    width: { xs: 48, sm: 40 },
+                    height: { xs: 48, sm: 40 },
+                    mr: { xs: 3, sm: 2 }
                   }
                 }}
-              />
-            )}
-          </Box>
-        </Paper>
-      ))}
+              >
+                <Avatar 
+                  src={post.author.photoURL} 
+                  alt={post.author.displayName}
+                  sx={{ bgcolor: 'primary.main' }}
+                >
+                  {post.author.displayName?.[0]?.toUpperCase()}
+                </Avatar>
+                <Box flex={1}>
+                  <Box display="flex" alignItems="center">
+                    <Typography 
+                      variant="subtitle1"
+                      sx={{ fontSize: { xs: '1.1rem', sm: '1rem' } }}
+                    >
+                      {post.author.displayName}
+                    </Typography>
+                    {post.author.verified && (
+                      <Tooltip title="Verified Profile">
+                        <Verified 
+                          color="primary" 
+                          sx={{ 
+                            ml: 0.5, 
+                            fontSize: { xs: '1.25rem', sm: '1rem' } 
+                          }} 
+                        />
+                      </Tooltip>
+                    )}
+                  </Box>
+                  <Typography 
+                    variant="body2" 
+                    color="text.secondary"
+                    sx={{ fontSize: { xs: '1rem', sm: '0.875rem' } }}
+                  >
+                    {new Date(post.createdAt.toDate()).toLocaleString()} • {post.author.userType}
+                    {post.isEdited && ' • Edited'}
+                  </Typography>
+                </Box>
+                {user && post.author.uid === user.uid && (
+                  <Box component="span" sx={{ ml: 'auto' }}>
+                    <IconButton 
+                      onClick={(e) => handleMenuOpen(e, post.id)}
+                      size={isMobile ? "large" : "small"}
+                    >
+                      <MoreVert />
+                    </IconButton>
+                    <Menu
+                      anchorEl={menuAnchorEl}
+                      open={Boolean(menuAnchorEl) && selectedPost === post.id}
+                      onClose={handleMenuClose}
+                    >
+                      <MenuItem onClick={() => handleEditClick(post)}>
+                        <EditOutlined sx={{ mr: 1 }} /> Edit
+                      </MenuItem>
+                      <MenuItem onClick={() => handleDeleteClick(post.id)}>
+                        <DeleteOutline sx={{ mr: 1 }} /> Delete
+                      </MenuItem>
+                    </Menu>
+                  </Box>
+                )}
+              </Box>
+              {/* Post Content */}
+              {editingPost === post.id ? (
+                <Box sx={{ mt: 2, mb: 2 }}>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={4}
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    variant="outlined"
+                  />
+                  <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                    <Button 
+                      onClick={() => {
+                        setEditingPost(null);
+                        setEditContent('');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      variant="contained" 
+                      onClick={() => handleEditPost(post.id)}
+                      disabled={!editContent.trim() || editContent === post.content}
+                    >
+                      Save
+                    </Button>
+                  </Box>
+                </Box>
+              ) : (
+                <>
+                  {renderPostContent(post)}
+                </>
+              )}
+              {/* Rest of the post rendering */}
+            </Paper>
+          );
+        })
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteDialog
+        open={showDeleteDialog}
+        onClose={() => {
+          console.log('Dialog closed');
+          setShowDeleteDialog(false);
+          setSelectedPost(null);
+          setMenuAnchorEl(null);
+        }}
+        onConfirm={() => {
+          console.log('Delete confirmation received for post:', selectedPost);
+          handleConfirmDelete(selectedPost);
+        }}
+        title="Delete Post"
+        content="Are you sure you want to delete this post? This action cannot be undone."
+      />
 
       {/* Tips & Insights Section */}
-      <Paper sx={{ p: 2, mb: 3 }}>
+      <Paper 
+        key="tips-insights"
+        sx={{ p: 2, mb: 3 }}
+      >
         <Box display="flex" alignItems="center" mb={1}>
           <Lightbulb color="warning" sx={{ mr: 1 }} />
           <Typography variant="h6">Tips & Insights</Typography>
@@ -711,9 +1183,121 @@ const RightSidebar = () => {
   const user = useSelector((state: RootState) => state.auth.user);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [suggestedUsers, setSuggestedUsers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { enqueueSnackbar } = useSnackbar();
 
-  const handleProfileClick = (userId: string) => {
-    navigate(`/view-profile/${userId}`);
+  const loadSuggestions = useCallback(async () => {
+    if (!user?.uid) {
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      console.log('Loading suggestions for user:', user.uid);
+      const suggestions = await getUserSuggestions(user.uid);
+      console.log('Loaded suggestions:', suggestions);
+      setSuggestedUsers(suggestions);
+    } catch (error) {
+      console.error('Error loading suggestions:', error);
+      enqueueSnackbar('Failed to load suggestions', { variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, [user, enqueueSnackbar]);
+
+  useEffect(() => {
+    loadSuggestions();
+  }, [loadSuggestions]);
+
+  const handleConnect = async (targetUserId: string) => {
+    if (!user?.uid) return;
+    try {
+      await connectWithUser(user.uid, targetUserId);
+      setSuggestedUsers(prev => prev.filter(u => u.uid !== targetUserId));
+      enqueueSnackbar('Connection request sent', { variant: 'success' });
+    } catch (error) {
+      console.error('Error connecting with user:', error);
+      enqueueSnackbar('Failed to send connection request', { variant: 'error' });
+    }
+  };
+
+  const getSimilarityInfo = (suggestedUser: UserProfile) => {
+    const similarities: string[] = [];
+    const matchScore: { [key: string]: number } = {
+      sports: 0,
+      location: 0,
+      activities: 0,
+      performance: 0
+    };
+
+    // Check for common sports
+    if (user?.athleteInfo && suggestedUser.athleteInfo) {
+      const userSports = user.athleteInfo.sports.map(s => s.sport.toLowerCase());
+      const suggestedSports = suggestedUser.athleteInfo.sports.map(s => s.sport.toLowerCase());
+      const commonSports = userSports.filter(sport => suggestedSports.includes(sport));
+      
+      if (commonSports.length > 0) {
+        similarities.push(`Same sport: ${commonSports[0]}`);
+        matchScore.sports = (commonSports.length / Math.max(userSports.length, suggestedSports.length)) * 100;
+      }
+
+      // Check for similar performance within the same sport
+      const commonSportPerformance = commonSports.filter(sport => {
+        const userSport = user.athleteInfo?.sports.find(s => s.sport.toLowerCase() === sport) as (AthleteStats & { performance?: PerformanceMetrics });
+        const suggestedSport = suggestedUser.athleteInfo?.sports.find(s => s.sport.toLowerCase() === sport) as (AthleteStats & { performance?: PerformanceMetrics });
+        
+        if (!userSport?.performance || !suggestedSport?.performance) return false;
+        
+        // Calculate average performance
+        const userPerf = Object.values(userSport.performance) as number[];
+        const suggestedPerf = Object.values(suggestedSport.performance) as number[];
+        
+        const userAvg = userPerf.reduce((a, b) => a + b, 0) / userPerf.length;
+        const suggestedAvg = suggestedPerf.reduce((a, b) => a + b, 0) / suggestedPerf.length;
+        
+        // Consider performance similar if they're within 20% of each other
+        return Math.abs(userAvg - suggestedAvg) / userAvg < 0.2;
+      });
+
+      if (commonSportPerformance.length > 0) {
+        similarities.push(`Similar performance in ${commonSportPerformance[0]}`);
+        matchScore.performance = (commonSportPerformance.length / commonSports.length) * 100;
+      }
+    }
+
+    // Check for location proximity
+    if (user?.location && suggestedUser.location) {
+      const isSameLocation = user.location.toLowerCase() === suggestedUser.location.toLowerCase();
+      if (isSameLocation) {
+        similarities.push(`Same location: ${suggestedUser.location}`);
+        matchScore.location = 100;
+      }
+    }
+
+    // Check for common activities
+    if (user?.athleteInfo?.activities && suggestedUser.athleteInfo?.activities) {
+      const userActivities = user.athleteInfo.activities;
+      const suggestedActivities = suggestedUser.athleteInfo.activities;
+      const commonActivities = userActivities.filter(activity => suggestedActivities.includes(activity));
+      
+      if (commonActivities.length > 0) {
+        similarities.push(`Similar activities: ${commonActivities[0]}`);
+        matchScore.activities = (commonActivities.length / Math.max(userActivities.length, suggestedActivities.length)) * 100;
+      }
+    }
+
+    // Calculate overall match percentage
+    const totalScore = Object.values(matchScore).reduce((sum, score) => sum + score, 0);
+    const averageScore = totalScore / Object.keys(matchScore).length;
+    const matchPercentage = Math.round(averageScore);
+
+    // Return the most relevant similarity with match percentage
+    if (similarities.length > 0) {
+      return `${similarities[0]} • ${matchPercentage}% Match`;
+    }
+
+    return `${suggestedUser.userType} • New Connection`;
   };
 
   return (
@@ -728,80 +1312,96 @@ const RightSidebar = () => {
           >
             Suggested Connections
           </Typography>
-          <List>
-            {Object.values(mockUsers).map((profile) => (
-              <ListItem
-                key={profile.id}
-                sx={{
-                  cursor: 'pointer',
-                  py: { xs: 2, sm: 1.5 },
-                  '&:hover': {
-                    backgroundColor: 'action.hover',
-                  },
-                  '& .MuiAvatar-root': {
-                    width: { xs: 48, sm: 40 },
-                    height: { xs: 48, sm: 40 }
-                  },
-                  '& .MuiListItemText-primary': {
-                    fontSize: { xs: '1.1rem', sm: '1rem' }
-                  },
-                  '& .MuiListItemText-secondary': {
-                    fontSize: { xs: '1rem', sm: '0.875rem' }
-                  },
-                  display: 'flex',
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 1
-                }}
-                onClick={() => handleProfileClick(profile.id)}
-              >
-                <ListItemAvatar>
-                  <Avatar>{profile.avatar}</Avatar>
-                </ListItemAvatar>
-                <Box flex={1} minWidth={0}>
-                  <Box display="flex" alignItems="center">
-                    <Typography noWrap>
-                      {profile.name}
-                    </Typography>
-                    {profile.isVerified && (
-                      <Tooltip title="Verified Profile">
-                        <Verified 
-                          color="primary" 
-                          sx={{ 
-                            ml: 0.5, 
-                            fontSize: { xs: '1.25rem', sm: '1rem' } 
-                          }} 
-                        />
-                      </Tooltip>
-                    )}
-                  </Box>
-                  <Typography 
-                    variant="body2" 
-                    color="text.secondary" 
-                    noWrap
-                  >
-                    {`${profile.role} • ${profile.sport}`}
-                  </Typography>
-                </Box>
-                <Button 
-                  size={isMobile ? "large" : "small"} 
-                  variant="outlined"
-                  sx={{ 
-                    fontSize: { xs: '1rem', sm: '0.875rem' },
-                    py: { xs: 1.5, sm: 1 },
-                    minWidth: 'auto',
-                    whiteSpace: 'nowrap'
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // TODO: Implement connect logic
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : suggestedUsers.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+              No suggestions available at the moment. Complete your profile to get better matches!
+            </Typography>
+          ) : (
+            <List>
+              {suggestedUsers.map((profile) => (
+                <ListItem
+                  key={profile.uid}
+                  onClick={() => navigate(`/view-profile/${profile.uid}`)}
+                  sx={{
+                    cursor: 'pointer',
+                    py: { xs: 2, sm: 1.5 },
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
+                    '& .MuiAvatar-root': {
+                      width: { xs: 48, sm: 40 },
+                      height: { xs: 48, sm: 40 }
+                    },
+                    '& .MuiListItemText-primary': {
+                      fontSize: { xs: '1.1rem', sm: '1rem' }
+                    },
+                    '& .MuiListItemText-secondary': {
+                      fontSize: { xs: '1rem', sm: '0.875rem' }
+                    },
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 1
                   }}
                 >
-                  Connect
-                </Button>
-              </ListItem>
-            ))}
-          </List>
+                  <ListItemAvatar>
+                    <Avatar 
+                      src={profile.photoURL} 
+                      alt={profile.displayName}
+                      sx={{ bgcolor: 'primary.main' }}
+                    >
+                      {profile.displayName[0]?.toUpperCase()}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <Box flex={1} minWidth={0}>
+                    <Box display="flex" alignItems="center">
+                      <Typography noWrap>
+                        {profile.displayName}
+                      </Typography>
+                      {profile.verified && (
+                        <Tooltip title="Verified Profile">
+                          <Verified 
+                            color="primary" 
+                            sx={{ 
+                              ml: 0.5, 
+                              fontSize: { xs: '1.25rem', sm: '1rem' } 
+                            }} 
+                          />
+                        </Tooltip>
+                      )}
+                    </Box>
+                    <Typography 
+                      variant="body2" 
+                      color="text.secondary" 
+                      noWrap
+                    >
+                      {getSimilarityInfo(profile)}
+                    </Typography>
+                  </Box>
+                  <Button 
+                    size={isMobile ? "large" : "small"} 
+                    variant="outlined"
+                    sx={{ 
+                      fontSize: { xs: '1rem', sm: '0.875rem' },
+                      py: { xs: 1.5, sm: 1 },
+                      minWidth: 'auto',
+                      whiteSpace: 'nowrap'
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleConnect(profile.uid);
+                    }}
+                  >
+                    Connect
+                  </Button>
+                </ListItem>
+              ))}
+            </List>
+          )}
         </CardContent>
       </Card>
 
@@ -819,7 +1419,7 @@ const RightSidebar = () => {
                   backgroundColor: 'action.hover',
                 },
               }}
-              onClick={() => handleProfileClick('user1')}
+              onClick={() => navigate('/view-profile/user1')}
             >
               <ListItemAvatar>
                 <Avatar sx={{ bgcolor: 'primary.main' }}>J</Avatar>

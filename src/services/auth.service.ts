@@ -23,10 +23,12 @@ import {
   collection, 
   query, 
   where, 
-  getDocs 
+  getDocs,
+  arrayRemove
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { User, UserType } from '../types/user';
+import { supabase } from '../config/supabase';
 
 const handleAuthError = (error: AuthError): never => {
   let message = 'An error occurred during authentication.';
@@ -434,20 +436,188 @@ export const deleteUserAccount = async (email: string, password: string): Promis
 
     // Delete user's data in this order:
     
-    // 1. Delete verification requests
+    // 1. Delete verification requests and their associated Cloudinary documents
     const verificationQuery = query(
       collection(db, 'verifications'),
       where('userId', '==', user.uid)
     );
     const verificationDocs = await getDocs(verificationQuery);
     for (const doc of verificationDocs.docs) {
+      const verificationData = doc.data();
+      // Delete verification documents from Cloudinary
+      if (verificationData.documents) {
+        for (const docUrl of Object.values(verificationData.documents)) {
+          if (typeof docUrl === 'string' && docUrl.includes('cloudinary.com')) {
+            try {
+              const publicId = docUrl.split('/').pop()?.split('.')[0];
+              if (publicId) {
+                await fetch(`https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/destroy`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    public_id: publicId,
+                    api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
+                    api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
+                  }),
+                });
+              }
+            } catch (error) {
+              console.error('Error deleting verification document from Cloudinary:', error);
+            }
+          }
+        }
+      }
       await deleteDoc(doc.ref);
     }
 
-    // 2. Delete user document from Firestore
+    // 2. Delete user's messages from both Firestore and Supabase
+    const messagesQuery = query(
+      collection(db, 'messages'),
+      where('senderId', '==', user.uid)
+    );
+    const messageDocs = await getDocs(messagesQuery);
+    for (const doc of messageDocs.docs) {
+      await deleteDoc(doc.ref);
+    }
+
+    // Delete messages from Supabase
+    try {
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('sender_id', user.uid);
+    } catch (error) {
+      console.error('Error deleting messages from Supabase:', error);
+    }
+
+    // 3. Delete user's notifications
+    const notificationsQuery = query(
+      collection(db, 'notifications'),
+      where('userId', '==', user.uid)
+    );
+    const notificationDocs = await getDocs(notificationsQuery);
+    for (const doc of notificationDocs.docs) {
+      await deleteDoc(doc.ref);
+    }
+
+    // 4. Delete user's posts and their media from Cloudinary
+    const postsQuery = query(
+      collection(db, 'posts'),
+      where('authorId', '==', user.uid)
+    );
+    const postDocs = await getDocs(postsQuery);
+    for (const doc of postDocs.docs) {
+      const postData = doc.data();
+      // Delete post media from Cloudinary
+      if (postData.media && Array.isArray(postData.media)) {
+        for (const mediaItem of postData.media) {
+          if (mediaItem.url && mediaItem.url.includes('cloudinary.com')) {
+            try {
+              const publicId = mediaItem.path || mediaItem.url.split('/').pop()?.split('.')[0];
+              if (publicId) {
+                await fetch(`https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/destroy`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    public_id: publicId,
+                    api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
+                    api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
+                  }),
+                });
+              }
+            } catch (error) {
+              console.error('Error deleting post media from Cloudinary:', error);
+            }
+          }
+        }
+      }
+      await deleteDoc(doc.ref);
+    }
+
+    // 5. Remove user from other users' followers/following/connections lists
+    if (userDoc.exists()) {
+      const userData = userDoc.data() as User;
+      const promises: Promise<void>[] = [];
+
+      // Remove from followers' following list
+      if (userData.followers?.length) {
+        for (const followerId of userData.followers) {
+          promises.push(
+            updateDoc(doc(db, 'users', followerId), {
+              following: arrayRemove(user.uid)
+            })
+          );
+        }
+      }
+
+      // Remove from following users' followers list
+      if (userData.following?.length) {
+        for (const followingId of userData.following) {
+          promises.push(
+            updateDoc(doc(db, 'users', followingId), {
+              followers: arrayRemove(user.uid)
+            })
+          );
+        }
+      }
+
+      // Remove from connections
+      if (userData.connections?.length) {
+        for (const connectionId of userData.connections) {
+          promises.push(
+            updateDoc(doc(db, 'users', connectionId), {
+              connections: arrayRemove(user.uid)
+            })
+          );
+        }
+      }
+
+      await Promise.all(promises);
+    }
+
+    // 6. Delete user's profile picture from Cloudinary if it exists
+    if (userDoc.exists()) {
+      const userData = userDoc.data() as User;
+      if (userData.photoURL && userData.photoURL.includes('cloudinary.com')) {
+        try {
+          const publicId = userData.photoURL.split('/').pop()?.split('.')[0];
+          if (publicId) {
+            await fetch(`https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/destroy`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                public_id: publicId,
+                api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
+                api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
+              }),
+            });
+          }
+        } catch (error) {
+          console.error('Error deleting profile picture from Cloudinary:', error);
+        }
+      }
+    }
+
+    // 7. Delete user's presence data from Supabase
+    try {
+      await supabase
+        .from('presence')
+        .delete()
+        .eq('user_id', user.uid);
+    } catch (error) {
+      console.error('Error deleting presence data from Supabase:', error);
+    }
+
+    // 8. Delete user document from Firestore
     await deleteDoc(userRef);
 
-    // 3. Finally, delete the auth account
+    // 9. Finally, delete the auth account
     await deleteUser(user);
 
     console.log('Account successfully deleted');
