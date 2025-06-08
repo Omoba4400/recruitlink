@@ -56,14 +56,13 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user?.uid) return;
 
-    const userStatusRef = doc(db, 'status', user.uid);
+    const userStatusRef = doc(db, `users/${user.uid}/status`, 'online');
     
     const updateOnlineStatus = async (status: boolean) => {
       try {
         await setDoc(userStatusRef, {
           online: status,
-          lastSeen: serverTimestamp(),
-          userId: user.uid // Add userId field for security rules
+          lastSeen: serverTimestamp()
         }, { merge: true });
       } catch (error) {
         console.error('Error updating online status:', error);

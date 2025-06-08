@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 import { User, UserProfile } from './user';
 
-export type ReactionType = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry';
+export type ReactionType = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry' | 'share';
 
 export interface MediaItem {
   id: string;
@@ -37,7 +37,7 @@ export interface Post {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   isEdited: boolean;
-  visibility: 'public' | 'connections' | 'private';
+  visibility: 'public' | 'followers' | 'connections' | 'private';
   tags?: string[];
   mentions?: string[];
   hashtags?: string[];

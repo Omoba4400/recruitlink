@@ -106,6 +106,7 @@ import {
   deletePost,
   updatePost,
   sharePost,
+  getUserPosts
 } from '../services/post.service';
 import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { doc, setDoc } from 'firebase/firestore';
@@ -294,7 +295,7 @@ const PostsTab: React.FC<PostsTabProps> = ({
       
       try {
         setLoading(true);
-        const fetchedPosts = await getFeed(userId);
+        const fetchedPosts = await getUserPosts(userId);
         setPosts(fetchedPosts.posts);
         setLastVisible(fetchedPosts.lastVisible);
         setHasMorePosts(fetchedPosts.hasMore);
@@ -315,7 +316,7 @@ const PostsTab: React.FC<PostsTabProps> = ({
 
     try {
       setLoading(true);
-      const morePosts = await getFeed(userId, lastVisible || undefined);
+      const morePosts = await getUserPosts(userId, lastVisible || undefined);
       setPosts((prevPosts: PostWithAuthor[]) => [...prevPosts, ...morePosts.posts]);
       setLastVisible(morePosts.lastVisible);
       setHasMorePosts(morePosts.hasMore);

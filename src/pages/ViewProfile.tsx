@@ -14,12 +14,16 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
+  ListItemAvatar,
   Grid,
   Skeleton,
   Divider,
   Card,
   CardContent,
   Link,
+  Menu,
+  MenuItem,
+  CircularProgress,
 } from '@mui/material';
 import {
   Verified,
@@ -38,11 +42,23 @@ import {
   Share,
   MoreVert,
   Edit,
+  PersonAdd,
+  PersonAddDisabled,
+  HourglassEmpty,
+  People,
 } from '@mui/icons-material';
 import { RootState } from '../store';
-import type { User } from '../types/user';
+import type { User, ConnectionRequest } from '../types/user';
 import Header from '../components/layout/Header';
-import { getUserProfile } from '../services/user.service';
+import { 
+  getUserProfile,
+  sendConnectionRequest,
+  getConnectionRequests,
+  disconnectFromUser,
+  followUser,
+  unfollowUser,
+  removeFollower,
+} from '../services/user.service';
 import { useSnackbar } from 'notistack';
 
 const ViewProfile = () => {
@@ -51,15 +67,23 @@ const ViewProfile = () => {
   const [profileData, setProfileData] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<'none' | 'pending' | 'connected'>('none');
+  const [followStatus, setFollowStatus] = useState<'following' | 'not_following'>('not_following');
   const { enqueueSnackbar } = useSnackbar();
+  const [followersMenuAnchor, setFollowersMenuAnchor] = useState<null | HTMLElement>(null);
+  const [followers, setFollowers] = useState<User[]>([]);
+  const [loadingFollowers, setLoadingFollowers] = useState(false);
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!userId) return;
+      if (!userId || !currentUser?.id) return;
       
       try {
         setLoading(true);
-        const userData = await getUserProfile(userId);
+        const [userData, connectionRequests] = await Promise.all([
+          getUserProfile(userId),
+          getConnectionRequests(currentUser.id)
+        ]);
+
         if (userData) {
           const userWithAuth: User = {
             ...userData,
@@ -71,12 +95,25 @@ const ViewProfile = () => {
             messageThreads: []
           };
           setProfileData(userWithAuth);
+          
           // Check connection status
-          setConnectionStatus(
-            userData.connections?.includes(currentUser?.id || '') 
-              ? 'connected' 
-              : 'none'
-          );
+          if (currentUser.connections?.includes(userId)) {
+            setConnectionStatus('connected');
+          } else {
+            // Check if there's a pending request
+            const pendingRequest = connectionRequests.find(
+              req => (req.senderId === currentUser.id && req.receiverId === userId) ||
+                    (req.senderId === userId && req.receiverId === currentUser.id)
+            );
+            setConnectionStatus(pendingRequest ? 'pending' : 'none');
+          }
+
+          // Check follow status
+          if (currentUser.following?.includes(userId)) {
+            setFollowStatus('following');
+          } else {
+            setFollowStatus('not_following');
+          }
         }
       } catch (error) {
         console.error('Error fetching user data:', error);
@@ -87,12 +124,78 @@ const ViewProfile = () => {
     };
 
     fetchUserData();
-  }, [userId, currentUser?.id, enqueueSnackbar]);
+  }, [userId, currentUser?.id, currentUser?.connections, currentUser?.following, enqueueSnackbar]);
+
+  useEffect(() => {
+    const fetchFollowers = async () => {
+      if (!profileData?.followers?.length) return;
+      
+      try {
+        setLoadingFollowers(true);
+        const followerProfiles = await Promise.all(
+          profileData.followers.map(id => getUserProfile(id))
+        );
+        setFollowers(followerProfiles.filter((f): f is User => f !== null));
+      } catch (error) {
+        console.error('Error fetching followers:', error);
+      } finally {
+        setLoadingFollowers(false);
+      }
+    };
+
+    fetchFollowers();
+  }, [profileData?.followers]);
 
   const handleConnect = async () => {
-    // TODO: Implement connection request
-    setConnectionStatus('pending');
-    enqueueSnackbar('Connection request sent', { variant: 'success' });
+    if (!currentUser?.id || !userId) return;
+    
+    try {
+      await sendConnectionRequest(currentUser.id, userId);
+      setConnectionStatus('pending');
+      enqueueSnackbar('Connection request sent', { variant: 'success' });
+    } catch (error) {
+      console.error('Error sending connection request:', error);
+      enqueueSnackbar('Failed to send connection request', { variant: 'error' });
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!currentUser?.id || !userId) return;
+    
+    try {
+      await disconnectFromUser(currentUser.id, userId);
+      setConnectionStatus('none');
+      enqueueSnackbar('Connection removed', { variant: 'success' });
+    } catch (error) {
+      console.error('Error disconnecting from user:', error);
+      enqueueSnackbar('Failed to remove connection', { variant: 'error' });
+    }
+  };
+
+  const handleFollow = async () => {
+    if (!currentUser?.id || !userId) return;
+    
+    try {
+      await followUser(currentUser.id, userId);
+      setFollowStatus('following');
+      enqueueSnackbar('Now following user', { variant: 'success' });
+    } catch (error) {
+      console.error('Error following user:', error);
+      enqueueSnackbar('Failed to follow user', { variant: 'error' });
+    }
+  };
+
+  const handleUnfollow = async () => {
+    if (!currentUser?.id || !userId) return;
+    
+    try {
+      await unfollowUser(currentUser.id, userId);
+      setFollowStatus('not_following');
+      enqueueSnackbar('Unfollowed user', { variant: 'success' });
+    } catch (error) {
+      console.error('Error unfollowing user:', error);
+      enqueueSnackbar('Failed to unfollow user', { variant: 'error' });
+    }
   };
 
   const handleMessage = () => {
@@ -103,6 +206,27 @@ const ViewProfile = () => {
   const handleShare = () => {
     // TODO: Implement profile sharing
     enqueueSnackbar('Share feature coming soon', { variant: 'info' });
+  };
+
+  const handleRemoveFollower = async (followerId: string) => {
+    if (!currentUser?.id) return;
+    
+    try {
+      await removeFollower(currentUser.id, followerId);
+      setFollowers(prev => prev.filter(f => f.id !== followerId));
+      enqueueSnackbar('Follower removed', { variant: 'success' });
+    } catch (error) {
+      console.error('Error removing follower:', error);
+      enqueueSnackbar('Failed to remove follower', { variant: 'error' });
+    }
+  };
+
+  const handleFollowersClick = (event: React.MouseEvent<HTMLElement>) => {
+    setFollowersMenuAnchor(event.currentTarget);
+  };
+
+  const handleFollowersClose = () => {
+    setFollowersMenuAnchor(null);
   };
 
   const renderProfileSkeleton = () => (
@@ -120,18 +244,51 @@ const ViewProfile = () => {
   const renderActionButtons = () => {
     if (currentUser?.id === profileData?.id) {
       return (
-        <Button
-          variant="outlined"
-          startIcon={<Edit />}
-          sx={{ borderRadius: 2 }}
-        >
-          Edit Profile
-        </Button>
+        <Box display="flex" gap={1}>
+          <Button
+            variant="outlined"
+            startIcon={<Edit />}
+            sx={{ borderRadius: 2 }}
+          >
+            Edit Profile
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<People />}
+            onClick={handleFollowersClick}
+            sx={{ borderRadius: 2 }}
+          >
+            Followers ({profileData?.followers?.length || 0})
+          </Button>
+        </Box>
       );
     }
 
     return (
-      <>
+      <Box display="flex" gap={1}>
+        {/* Follow/Unfollow Button */}
+        {followStatus === 'not_following' ? (
+          <Button
+            variant="outlined"
+            startIcon={<PersonAdd />}
+            onClick={handleFollow}
+            sx={{ borderRadius: 2 }}
+          >
+            Follow
+          </Button>
+        ) : (
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<PersonAddDisabled />}
+            onClick={handleUnfollow}
+            sx={{ borderRadius: 2 }}
+          >
+            Unfollow
+          </Button>
+        )}
+
+        {/* Connect/Disconnect Button */}
         {connectionStatus === 'none' && (
           <Button
             variant="contained"
@@ -146,9 +303,10 @@ const ViewProfile = () => {
           <Button
             variant="outlined"
             disabled
+            startIcon={<HourglassEmpty />}
             sx={{ borderRadius: 2 }}
           >
-            Pending
+            Request Pending
           </Button>
         )}
         {connectionStatus === 'connected' && (
@@ -165,14 +323,14 @@ const ViewProfile = () => {
               variant="outlined"
               color="error"
               startIcon={<PersonRemove />}
-              onClick={() => setConnectionStatus('none')}
+              onClick={handleDisconnect}
               sx={{ borderRadius: 2 }}
             >
               Remove
             </Button>
           </>
         )}
-      </>
+      </Box>
     );
   };
 
@@ -374,6 +532,64 @@ const ViewProfile = () => {
             )}
           </Grid>
         </Grid>
+
+        {/* Followers Menu */}
+        <Menu
+          anchorEl={followersMenuAnchor}
+          open={Boolean(followersMenuAnchor)}
+          onClose={handleFollowersClose}
+          PaperProps={{
+            sx: {
+              width: 320,
+              maxHeight: 400,
+            },
+          }}
+        >
+          <Box p={2}>
+            <Typography variant="h6" gutterBottom>
+              Followers
+            </Typography>
+          </Box>
+          <Divider />
+          {loadingFollowers ? (
+            <Box p={2} display="flex" justifyContent="center">
+              <CircularProgress size={24} />
+            </Box>
+          ) : followers.length > 0 ? (
+            <List>
+              {followers.map((follower) => (
+                <ListItem
+                  key={follower.id}
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      color="error"
+                      onClick={() => handleRemoveFollower(follower.id)}
+                    >
+                      <PersonRemove />
+                    </IconButton>
+                  }
+                >
+                  <ListItemAvatar>
+                    <Avatar src={follower.photoURL || undefined}>
+                      {follower.displayName?.[0]}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={follower.displayName}
+                    secondary={follower.userType}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Box p={2}>
+              <Typography color="textSecondary" align="center">
+                No followers yet
+              </Typography>
+            </Box>
+          )}
+        </Menu>
       </Container>
     </Box>
   );

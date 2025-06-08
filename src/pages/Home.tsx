@@ -80,7 +80,7 @@ import type { PostWithAuthor, Comment as PostComment, Reaction, ReactionType } f
 import { useSnackbar } from 'notistack';
 import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { getUserProfile } from '../services/user.service';
-import { getUserSuggestions, connectWithUser } from '../services/user.service';
+import { getUserSuggestions, connectWithUser, sendConnectionRequest } from '../services/user.service';
 import { UserProfile } from '../types/user';
 import { v4 as uuidv4 } from 'uuid';
 import DeleteDialog from '../components/DeleteDialog';
@@ -461,48 +461,45 @@ const MainFeed = () => {
   const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
-    const loadPosts = async () => {
-      if (!user?.uid) {
-        console.error('No user ID available for loading posts');
-        return;
-      }
-
+    const loadInitialPosts = async () => {
+      if (!user) return;
+      
       try {
         setLoading(true);
-        console.log('Loading posts for user:', user.uid);
-        const { posts: newPosts, lastVisible: last, hasMore } = await getFeed(user.uid);
-        
-        // Validate posts before setting state
-        const validPosts = newPosts.filter(post => {
-          if (!post.id) {
-            console.error('Invalid post data - missing ID:', post);
-            return false;
-          }
-          if (!post.author?.uid) {
-            console.error('Invalid post data - missing author:', post);
-            return false;
-          }
-          return true;
+        const newPosts = await getFeed(user);
+        setPosts(newPosts);
+
+        // Load comment user data
+        const userIds = new Set<string>();
+        newPosts.forEach(post => {
+          post.comments?.forEach(comment => {
+            userIds.add(comment.userId);
+          });
         });
 
-        console.log('Loaded valid posts:', validPosts.length);
-        console.log('Post details:', validPosts.map(p => ({ id: p.id, authorId: p.author.uid })));
-        setPosts(validPosts);
-        setLastVisible(last);
-        setHasMore(hasMore);
+        const userDataMap = new Map<string, { displayName: string; photoURL?: string }>();
+        await Promise.all(
+          Array.from(userIds).map(async (userId) => {
+            const userData = await getUserProfile(userId);
+            if (userData) {
+              userDataMap.set(userId, {
+                displayName: userData.displayName,
+                photoURL: userData.photoURL
+              });
+            }
+          })
+        );
+        setCommentUsers(userDataMap);
       } catch (error) {
         console.error('Error loading posts:', error);
-        enqueueSnackbar('Failed to load posts. Please try refreshing the page.', { 
-          variant: 'error',
-          autoHideDuration: 5000
-        });
+        enqueueSnackbar('Failed to load posts', { variant: 'error' });
       } finally {
         setLoading(false);
       }
     };
 
-    loadPosts();
-  }, [user?.uid, enqueueSnackbar, posts.length === 0]);
+    loadInitialPosts();
+  }, [user, enqueueSnackbar]);
 
   const renderPostContent = (post: PostWithAuthor) => {
     const mediaItems = post.media || [];
@@ -631,11 +628,22 @@ const MainFeed = () => {
     }
 
     try {
-      await sharePost(postId);
+      const post = posts.find(p => p.id === postId);
+      if (!post) return;
+
+      const hasShared = post.reactions?.some(r => r.userId === user.uid && r.type === 'share');
+
+      if (hasShared) {
+        enqueueSnackbar('You have already shared this post', { variant: 'info' });
+        return;
+      }
+
+      await sharePost(postId, user.uid);
       setPosts(prevPosts => prevPosts.map(p => 
-        p.id === postId 
-          ? { ...p, shares: p.shares + 1 }
-          : p
+        p.id === postId ? {
+          ...p,
+          reactions: [...(p.reactions || []), { userId: user.uid, type: 'share' as ReactionType, createdAt: Timestamp.now() }]
+        } : p
       ));
       enqueueSnackbar('Post shared successfully', { variant: 'success' });
     } catch (error) {
@@ -655,6 +663,12 @@ const MainFeed = () => {
     setSelectedMedia(prevMedia => prevMedia.filter((_, i) => i !== index));
   };
 
+  interface FeedResponse {
+    posts: PostWithAuthor[];
+    lastVisible: DocumentSnapshot<DocumentData> | null;
+    hasMore: boolean;
+  }
+
   const handleCreatePost = async () => {
     if (!user || !postContent.trim()) {
       enqueueSnackbar('Please enter some content for your post', { variant: 'warning' });
@@ -663,47 +677,50 @@ const MainFeed = () => {
 
     try {
       setIsPosting(true);
-      console.log('Creating post with authorId:', user.uid);
-      const postId = await createPost(
-        user.uid,
-        postContent,
-        selectedMedia,
-        'public'
-      );
+      
+      // Upload media files first if any
+      const mediaUrls: string[] = [];
+      if (selectedMedia.length > 0) {
+        for (const file of selectedMedia) {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('upload_preset', process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET!);
 
-      // Get the complete user profile
-      const authorProfile = await getUserProfile(user.uid);
-      if (!authorProfile) {
-        throw new Error('Failed to get author profile');
+          const response = await fetch(
+            `https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/auto/upload`,
+            {
+              method: 'POST',
+              body: formData,
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error('Failed to upload media');
+          }
+
+          const data = await response.json();
+          mediaUrls.push(data.secure_url);
+        }
       }
 
-      console.log('Author profile:', authorProfile);
+      // Create the post with media URLs
+      await createPost(
+        user.uid,
+        {
+          content: postContent,
+          media: mediaUrls,
+          visibility: 'public'
+        }
+      );
 
-      // Add the new post to the beginning of the posts array
-      const newPost: PostWithAuthor = {
-        id: postId,
-        content: postContent,
-        reactions: [],
-        comments: [],
-        shares: 0,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        isEdited: false,
-        visibility: 'public' as const,
-        author: authorProfile,
-        media: selectedMedia.map((file, index) => ({
-          id: `${postId}-media-${index}`,
-          type: file.type.startsWith('video/') ? 'video' : 'image',
-          url: URL.createObjectURL(file),
-          path: `posts/${postId}/${file.name}`,
-          filename: file.name
-        }))
-      };
-
-      setPosts(prevPosts => [newPost, ...prevPosts]);
+      // Clear the form
       setPostContent('');
       setSelectedMedia([]);
       enqueueSnackbar('Post created successfully', { variant: 'success' });
+      
+      // Refresh the feed by fetching latest posts
+      const newPosts = await getFeed(user);
+      setPosts(newPosts);
     } catch (error) {
       console.error('Error creating post:', error);
       enqueueSnackbar('Failed to create post', { variant: 'error' });
@@ -1132,6 +1149,90 @@ const MainFeed = () => {
               ) : (
                 <>
                   {renderPostContent(post)}
+                  {/* Post Actions */}
+                  <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <IconButton 
+                      onClick={() => handleReaction(post.id)}
+                      color={post.reactions?.some(r => r.userId === user?.uid && r.type === 'like') ? 'primary' : 'default'}
+                    >
+                      <ThumbUp />
+                    </IconButton>
+                    <Typography variant="body2" color="text.secondary">
+                      {post.reactions?.length || 0}
+                    </Typography>
+
+                    <IconButton onClick={() => setShowCommentInput(post.id)}>
+                      <CommentIcon />
+                    </IconButton>
+                    <Typography variant="body2" color="text.secondary">
+                      {post.comments?.length || 0}
+                    </Typography>
+
+                    <IconButton onClick={() => handleShare(post.id)}>
+                      <Share />
+                    </IconButton>
+                    <Typography variant="body2" color="text.secondary">
+                      {post.shares || 0}
+                    </Typography>
+                  </Box>
+
+                  {/* Comment Input */}
+                  {showCommentInput === post.id && (
+                    <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        placeholder="Write a comment..."
+                        value={commentContent}
+                        onChange={(e) => setCommentContent(e.target.value)}
+                        multiline
+                        maxRows={4}
+                      />
+                      <IconButton 
+                        color="primary"
+                        onClick={() => handleAddComment(post.id)}
+                        disabled={!commentContent.trim()}
+                      >
+                        <SendOutlined />
+                      </IconButton>
+                    </Box>
+                  )}
+
+                  {/* Comments List */}
+                  {post.comments?.length > 0 && (
+                    <Box sx={{ mt: 2 }}>
+                      {post.comments.map((comment) => (
+                        <Box 
+                          key={comment.id} 
+                          sx={{ 
+                            display: 'flex', 
+                            alignItems: 'flex-start',
+                            gap: 1,
+                            mt: 1 
+                          }}
+                        >
+                          <Avatar
+                            src={commentUsers.get(comment.userId)?.photoURL}
+                            sx={{ width: 32, height: 32 }}
+                          >
+                            {commentUsers.get(comment.userId)?.displayName?.[0]?.toUpperCase()}
+                          </Avatar>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="subtitle2">
+                              {commentUsers.get(comment.userId)?.displayName || 'User'}
+                            </Typography>
+                            <Typography variant="body2">
+                              {comment.content}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date(comment.createdAt.toDate()).toLocaleString()}
+                              {comment.isEdited && ' • Edited'}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
                 </>
               )}
               {/* Rest of the post rendering */}
@@ -1213,7 +1314,7 @@ const RightSidebar = () => {
   const handleConnect = async (targetUserId: string) => {
     if (!user?.uid) return;
     try {
-      await connectWithUser(user.uid, targetUserId);
+      await sendConnectionRequest(user.uid, targetUserId);
       setSuggestedUsers(prev => prev.filter(u => u.uid !== targetUserId));
       enqueueSnackbar('Connection request sent', { variant: 'success' });
     } catch (error) {

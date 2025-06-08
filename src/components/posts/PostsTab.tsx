@@ -4,9 +4,9 @@ import { useSnackbar } from 'notistack';
 import { Box, Typography } from '@mui/material';
 import { RootState } from '../../store/store';
 import { PostWithAuthor, Reaction, ReactionType } from '../../types/post';
-import { getFeed, deletePost, updatePost, addReaction, removeReaction } from '../../services/post.service';
+import { getFeed, deletePost, updatePost, addReaction, removeReaction, getUserPosts } from '../../services/post.service';
 import Post from './Post';
-import { Timestamp, DocumentSnapshot, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
 import DeleteDialog from '../../components/DeleteDialog';
 
 const POST_LIMIT = 10;
@@ -27,11 +27,14 @@ interface PostsTabProps {
   setSelectedPost: (postId: string) => void;
   posts: PostWithAuthor[];
   setPosts: React.Dispatch<React.SetStateAction<PostWithAuthor[]>>;
+  lastVisible: DocumentSnapshot<DocumentData> | null;
+  setLastVisible: (lastVisible: DocumentSnapshot<DocumentData> | null) => void;
 }
 
 interface FeedResponse {
   posts: PostWithAuthor[];
-  lastVisible: QueryDocumentSnapshot<DocumentData> | null;
+  lastVisible: DocumentSnapshot<DocumentData> | null;
+  hasMore: boolean;
 }
 
 const PostsTab: React.FC<PostsTabProps> = ({
@@ -49,21 +52,22 @@ const PostsTab: React.FC<PostsTabProps> = ({
   selectedPost,
   setSelectedPost,
   posts,
-  setPosts
+  setPosts,
+  lastVisible,
+  setLastVisible
 }) => {
   const lastPostRef = useRef<HTMLDivElement>(null);
   const { enqueueSnackbar } = useSnackbar();
   const user = useSelector((state: RootState) => state.auth.user);
-  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
 
   useEffect(() => {
     const loadPosts = async () => {
       try {
         setLoading(true);
-        const response = await getFeed(userId) as FeedResponse;
+        const response = await getUserPosts(userId);
         setPosts(response.posts);
         setLastVisible(response.lastVisible);
-        setHasMorePosts(response.posts.length === POST_LIMIT);
+        setHasMorePosts(response.hasMore);
       } catch (error) {
         console.error('Error loading posts:', error);
         enqueueSnackbar('Failed to load posts', { variant: 'error' });
@@ -80,10 +84,10 @@ const PostsTab: React.FC<PostsTabProps> = ({
 
     try {
       setLoading(true);
-      const response = await getFeed(userId, lastVisible) as FeedResponse;
+      const response = await getUserPosts(userId, lastVisible);
       setPosts((prevPosts: PostWithAuthor[]) => [...prevPosts, ...response.posts]);
       setLastVisible(response.lastVisible);
-      setHasMorePosts(response.posts.length === POST_LIMIT);
+      setHasMorePosts(response.hasMore);
     } catch (error) {
       console.error('Error loading more posts:', error);
       enqueueSnackbar('Failed to load more posts', { variant: 'error' });

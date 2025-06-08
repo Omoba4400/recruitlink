@@ -28,7 +28,7 @@ import {
   Visibility as ViewIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
-import { collection, query, where, getDocs, doc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, orderBy, Timestamp } from 'firebase/firestore';
 import { db, auth } from '../../config/firebase';
 import { UserProfile } from '../../types/user';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
@@ -41,6 +41,13 @@ interface VerificationRequest extends UserProfile {
   };
   verificationInfo?: string;
 }
+
+const formatTimestamp = (timestamp: string | Timestamp): string => {
+  if (timestamp instanceof Timestamp) {
+    return timestamp.toDate().toLocaleDateString();
+  }
+  return new Date(timestamp).toLocaleDateString();
+};
 
 const VerificationDashboard: React.FC = () => {
   const { isAdmin, loading: authLoading } = useAdminAuth();
@@ -149,7 +156,9 @@ const VerificationDashboard: React.FC = () => {
             verificationInfo: verificationData.info,
             verificationId: doc.id,
             uid: userData.uid,
-            createdAt: verificationData.createdAt?.toDate().toISOString() || userData.createdAt
+            createdAt: verificationData.createdAt instanceof Timestamp 
+              ? verificationData.createdAt.toDate().toISOString() 
+              : verificationData.createdAt || userData.createdAt
           };
           return combinedData as VerificationRequest;
         })
@@ -441,7 +450,7 @@ const VerificationDashboard: React.FC = () => {
                     </TableCell>
                     <TableCell>{request.email}</TableCell>
                     <TableCell>
-                      {new Date(request.updatedAt).toLocaleDateString()}
+                      {formatTimestamp(request.createdAt)}
                     </TableCell>
                     <TableCell align="right">
                       <Tooltip title="View Details">

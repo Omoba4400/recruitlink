@@ -200,4 +200,13 @@ export interface User extends UserProfile {
   isAdmin: boolean;
   blockedUsers?: string[];
   messageThreads?: string[];
+}
+
+export interface ConnectionRequest {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
 } 

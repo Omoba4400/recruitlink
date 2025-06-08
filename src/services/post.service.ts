@@ -16,12 +16,15 @@ import {
   serverTimestamp,
   Timestamp,
   DocumentSnapshot,
-  increment
+  increment,
+  DocumentData,
+  QuerySnapshot
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Post, PostWithAuthor, Comment, MediaItem, Reaction, ReactionType } from '../types/post';
 import { getUserProfile } from './user.service';
 import { v4 as uuidv4 } from 'uuid';
+import { User } from '../types/user';
 
 const POSTS_COLLECTION = 'posts';
 const POSTS_PER_PAGE = 10;
@@ -55,40 +58,27 @@ const uploadToCloudinary = async (file: File): Promise<MediaItem> => {
 
 export const createPost = async (
   userId: string,
-  content: string,
-  mediaFiles?: File[],
-  visibility: 'public' | 'connections' | 'private' = 'public',
-  tags: string[] = []
+  data: {
+    content: string;
+    media?: string[];
+    visibility?: 'public' | 'followers' | 'connections' | 'private';
+  }
 ): Promise<string> => {
   try {
-    // Handle media uploads first
-    const mediaItems: MediaItem[] = [];
-    if (mediaFiles && mediaFiles.length > 0) {
-      for (const file of mediaFiles) {
-        const mediaItem = await uploadToCloudinary(file);
-        mediaItems.push(mediaItem);
-      }
-    }
-
-    // Create the post document
-    const postData: Omit<Post, 'id'> = {
+    const postData = {
       authorId: userId,
-      content,
-      media: mediaItems,
-      visibility,
-      tags,
-      reactions: [],
+      content: data.content,
+      media: data.media || [],
+      visibility: data.visibility || 'public',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      likes: [],
       comments: [],
-      shares: 0,
-      createdAt: serverTimestamp() as Timestamp,
-      updatedAt: serverTimestamp() as Timestamp,
-      isEdited: false,
-      mentions: extractMentions(content),
-      hashtags: extractHashtags(content)
+      shares: 0
     };
-
-    const postRef = await addDoc(collection(db, POSTS_COLLECTION), postData);
-    return postRef.id;
+    
+    const docRef = await addDoc(collection(db, 'posts'), postData);
+    return docRef.id;
   } catch (error) {
     console.error('Error creating post:', error);
     throw error;
@@ -114,115 +104,79 @@ export const getPost = async (postId: string): Promise<PostWithAuthor | null> =>
   }
 };
 
-export const getFeed = async (
-  userId: string,
-  lastPost?: DocumentSnapshot,
-  filter: 'all' | 'following' | 'trending' = 'all'
-): Promise<{ posts: PostWithAuthor[]; lastVisible: DocumentSnapshot | null; hasMore: boolean }> => {
+export const getFeed = async (user: User): Promise<PostWithAuthor[]> => {
   try {
-    console.log('Getting feed for user:', userId, 'filter:', filter);
-    let postsQuery;
-
-    if (filter === 'following') {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      const following = userDoc.data()?.following || [];
-      postsQuery = query(
-        collection(db, POSTS_COLLECTION),
-        where('authorId', 'in', [...following, userId]),
-        orderBy('createdAt', 'desc'),
-        limit(POSTS_PER_PAGE + 1)
-      );
-    } else if (filter === 'trending') {
-      postsQuery = query(
-        collection(db, POSTS_COLLECTION),
-        where('visibility', '==', 'public'),
-        orderBy('createdAt', 'desc'),
-        limit(POSTS_PER_PAGE + 1)
-      );
-    } else {
-      // Default 'all' filter - get posts that are either public OR created by the user
-      postsQuery = query(
-        collection(db, POSTS_COLLECTION),
-        where('visibility', '==', 'public'),
-        orderBy('createdAt', 'desc'),
-        limit(POSTS_PER_PAGE)
-      );
-    }
-
-    if (lastPost) {
-      postsQuery = query(postsQuery, startAfter(lastPost));
-    }
-
-    console.log('Executing posts query...');
-    const snapshot = await getDocs(postsQuery);
-    console.log('Got', snapshot.docs.length, 'posts from query');
+    const postsRef = collection(db, 'posts');
     
-    const posts: PostWithAuthor[] = [];
-    let lastVisible: DocumentSnapshot | null = null;
+    // Create queries for different visibility levels
+    const publicPostsQuery = query(
+      postsRef,
+      where('visibility', '==', 'public'),
+      orderBy('createdAt', 'desc')
+    );
 
-    const hasMore = snapshot.docs.length > POSTS_PER_PAGE;
-    const docsToProcess = hasMore ? snapshot.docs.slice(0, -1) : snapshot.docs;
+    const userPostsQuery = query(
+      postsRef,
+      where('authorId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
 
-    // Process posts and get author profiles
-    for (const doc of docsToProcess) {
-      const postData = doc.data() as Post;
-      try {
-        const author = await getUserProfile(postData.authorId);
-        if (author) {
-          posts.push({
-            ...postData,
-            id: doc.id,
-            author
-          });
-        }
-      } catch (error) {
-        console.error('Error getting author for post:', doc.id, error);
-      }
-    }
+    const followersPostsQuery = user.following?.length ? query(
+      postsRef,
+      where('visibility', '==', 'followers'),
+      where('authorId', 'in', user.following.slice(0, 10)), // Firestore limits 'in' to 10 values
+      orderBy('createdAt', 'desc')
+    ) : null;
 
-    // If we're in 'all' mode, also get the user's own posts
-    if (filter === 'all') {
-      const userPostsQuery = query(
-        collection(db, POSTS_COLLECTION),
-        where('authorId', '==', userId),
-        orderBy('createdAt', 'desc'),
-        limit(POSTS_PER_PAGE)
-      );
+    const connectionsPostsQuery = user.connections?.length ? query(
+      postsRef,
+      where('visibility', '==', 'connections'),
+      where('authorId', 'in', user.connections.slice(0, 10)), // Firestore limits 'in' to 10 values
+      orderBy('createdAt', 'desc')
+    ) : null;
 
-      const userSnapshot = await getDocs(userPostsQuery);
-      console.log('Got', userSnapshot.docs.length, 'user posts');
+    // Execute all queries in parallel
+    const [publicPosts, userPosts, followersPosts, connectionsPosts] = await Promise.all([
+      getDocs(publicPostsQuery),
+      getDocs(userPostsQuery),
+      followersPostsQuery ? getDocs(followersPostsQuery) : Promise.resolve(null),
+      connectionsPostsQuery ? getDocs(connectionsPostsQuery) : Promise.resolve(null)
+    ]);
 
-      for (const doc of userSnapshot.docs) {
-        const postData = doc.data() as Post;
-        try {
-          const author = await getUserProfile(postData.authorId);
-          if (author) {
-            posts.push({
+    // Combine and process results
+    const allPosts = new Map<string, PostWithAuthor>();
+
+    const processQuerySnapshot = async (snapshot: QuerySnapshot<DocumentData> | null) => {
+      if (!snapshot) return;
+      for (const doc of snapshot.docs) {
+        if (!allPosts.has(doc.id)) {
+          const postData = doc.data() as Post;
+          const authorData = await getUserProfile(postData.authorId);
+          if (authorData) {
+            allPosts.set(doc.id, {
               ...postData,
               id: doc.id,
-              author
+              author: authorData
             });
           }
-        } catch (error) {
-          console.error('Error getting author for user post:', doc.id, error);
         }
       }
-    }
+    };
 
-    // Sort all posts by creation date
-    posts.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+    await Promise.all([
+      processQuerySnapshot(publicPosts),
+      processQuerySnapshot(userPosts),
+      processQuerySnapshot(followersPosts),
+      processQuerySnapshot(connectionsPosts)
+    ]);
 
-    // Take only POSTS_PER_PAGE posts
-    const postsToReturn = posts.slice(0, POSTS_PER_PAGE);
-    
-    if (hasMore) {
-      lastVisible = snapshot.docs[POSTS_PER_PAGE - 1];
-    }
+    // Convert to array and sort by createdAt
+    return Array.from(allPosts.values())
+      .sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis())
+      .slice(0, 20); // Limit to 20 most recent posts
 
-    console.log('Returning', postsToReturn.length, 'posts');
-    return { posts: postsToReturn, lastVisible, hasMore };
   } catch (error) {
-    console.error('Error in getFeed:', error);
+    console.error('Error getting feed:', error);
     throw error;
   }
 };
@@ -369,7 +323,7 @@ export const addComment = async (
       userId,
       content,
       reactions: [],
-      createdAt: serverTimestamp() as Timestamp,
+      createdAt: Timestamp.now(),
       isEdited: false
     };
 
@@ -463,12 +417,12 @@ export const addReaction = async (
         )
       });
     } else {
-      // Add new reaction
+      // Add new reaction with regular timestamp
       await updateDoc(postRef, {
         reactions: arrayUnion({
           userId,
           type,
-          createdAt: serverTimestamp()
+          createdAt: Timestamp.now()
         })
       });
     }
@@ -502,14 +456,74 @@ export const removeReaction = async (
   }
 };
 
-export const sharePost = async (postId: string): Promise<void> => {
+export const sharePost = async (postId: string, userId: string): Promise<void> => {
   try {
+    // Instead of directly incrementing shares, we'll add a share reaction
     const postRef = doc(db, POSTS_COLLECTION, postId);
     await updateDoc(postRef, {
-      shares: increment(1)
+      reactions: arrayUnion({
+        userId,
+        type: 'share' as ReactionType,
+        createdAt: Timestamp.now()
+      })
     });
   } catch (error) {
     console.error('Error sharing post:', error);
+    throw error;
+  }
+};
+
+export const getUserPosts = async (
+  userId: string,
+  lastVisible?: DocumentSnapshot<DocumentData>
+): Promise<{
+  posts: PostWithAuthor[];
+  lastVisible: DocumentSnapshot<DocumentData> | null;
+  hasMore: boolean;
+}> => {
+  try {
+    const postsRef = collection(db, POSTS_COLLECTION);
+    let q = query(
+      postsRef,
+      where('authorId', '==', userId),
+      orderBy('createdAt', 'desc'),
+      limit(POSTS_PER_PAGE)
+    );
+
+    if (lastVisible) {
+      q = query(
+        postsRef,
+        where('authorId', '==', userId),
+        orderBy('createdAt', 'desc'),
+        startAfter(lastVisible),
+        limit(POSTS_PER_PAGE)
+      );
+    }
+
+    const querySnapshot = await getDocs(q);
+    const posts: PostWithAuthor[] = [];
+    
+    const author = await getUserProfile(userId);
+    if (!author) {
+      throw new Error('Author not found');
+    }
+
+    for (const doc of querySnapshot.docs) {
+      const postData = doc.data() as Post;
+      posts.push({
+        ...postData,
+        id: doc.id,
+        author
+      });
+    }
+
+    return {
+      posts,
+      lastVisible: querySnapshot.docs[querySnapshot.docs.length - 1] || null,
+      hasMore: querySnapshot.docs.length === POSTS_PER_PAGE
+    };
+  } catch (error) {
+    console.error('Error getting user posts:', error);
     throw error;
   }
 };

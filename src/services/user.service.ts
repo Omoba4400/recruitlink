@@ -11,10 +11,12 @@ import {
   DocumentData,
   setDoc,
   serverTimestamp,
-  limit as firestoreLimit
+  limit as firestoreLimit,
+  addDoc,
+  orderBy
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { User, UserProfile } from '../types/user';
+import { User, UserProfile, ConnectionRequest } from '../types/user';
 
 export const getUserById = async (userId: string): Promise<User | null> => {
   const userDoc = await getDoc(doc(db, 'users', userId));
@@ -472,6 +474,154 @@ export const getUserSuggestions = async (
     return sortedUsers;
   } catch (error) {
     console.error('Error getting user suggestions:', error);
+    throw error;
+  }
+};
+
+export const sendConnectionRequest = async (
+  senderId: string,
+  receiverId: string
+): Promise<void> => {
+  try {
+    const timestamp = new Date().toISOString();
+    
+    // Create the connection request
+    await addDoc(collection(db, 'connectionRequests'), {
+      senderId,
+      receiverId,
+      status: 'pending',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+
+    // Create a notification for the receiver
+    await addDoc(collection(db, 'notifications'), {
+      userId: receiverId,
+      type: 'connection_request',
+      title: 'New Connection Request',
+      content: 'Someone wants to connect with you',
+      read: false,
+      createdAt: timestamp
+    });
+  } catch (error) {
+    console.error('Error sending connection request:', error);
+    throw error;
+  }
+};
+
+export const acceptConnectionRequest = async (
+  requestId: string,
+  senderId: string,
+  receiverId: string
+): Promise<void> => {
+  try {
+    // First, update the request status
+    const requestRef = doc(db, 'connectionRequests', requestId);
+    await updateDoc(requestRef, {
+      status: 'accepted',
+      updatedAt: new Date().toISOString()
+    });
+
+    // Update receiver's connections first (this is the current user)
+    const receiverRef = doc(db, 'users', receiverId);
+    await updateDoc(receiverRef, {
+      connections: arrayUnion(senderId),
+      updatedAt: new Date().toISOString()
+    });
+
+    // Then update sender's connections
+    const senderRef = doc(db, 'users', senderId);
+    await updateDoc(senderRef, {
+      connections: arrayUnion(receiverId),
+      updatedAt: new Date().toISOString()
+    });
+
+    // Create notifications
+    const timestamp = new Date().toISOString();
+    
+    // Create notification for the receiver (current user)
+    await addDoc(collection(db, 'notifications'), {
+      userId: receiverId,
+      type: 'new_connection',
+      title: 'New Connection',
+      content: 'You have accepted a connection request',
+      read: false,
+      createdAt: timestamp
+    });
+
+    // Create notification for the sender
+    await addDoc(collection(db, 'notifications'), {
+      userId: senderId,
+      type: 'connection_accepted',
+      title: 'Connection Request Accepted',
+      content: 'Your connection request has been accepted',
+      read: false,
+      createdAt: timestamp
+    });
+
+  } catch (error) {
+    console.error('Error accepting connection request:', error);
+    throw error;
+  }
+};
+
+export const rejectConnectionRequest = async (
+  requestId: string
+): Promise<void> => {
+  try {
+    const requestRef = doc(db, 'connectionRequests', requestId);
+    await updateDoc(requestRef, {
+      status: 'rejected',
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error rejecting connection request:', error);
+    throw error;
+  }
+};
+
+export const getConnectionRequests = async (
+  userId: string,
+  type: 'received' | 'sent' = 'received'
+): Promise<ConnectionRequest[]> => {
+  try {
+    const q = query(
+      collection(db, 'connectionRequests'),
+      where(type === 'received' ? 'receiverId' : 'senderId', '==', userId),
+      where('status', '==', 'pending'),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as ConnectionRequest[];
+  } catch (error) {
+    console.error('Error getting connection requests:', error);
+    throw error;
+  }
+};
+
+export const removeFollower = async (
+  userId: string,
+  followerIdToRemove: string
+): Promise<void> => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const followerRef = doc(db, 'users', followerIdToRemove);
+    
+    // Remove from followers list of the user
+    await updateDoc(userRef, {
+      followers: arrayRemove(followerIdToRemove)
+    });
+    
+    // Remove from following list of the follower
+    await updateDoc(followerRef, {
+      following: arrayRemove(userId)
+    });
+  } catch (error) {
+    console.error('Error removing follower:', error);
     throw error;
   }
 }; 

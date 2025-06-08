@@ -74,15 +74,25 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        // Allow connection updates from either user
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['connections', 'updatedAt']) &&
+          (
+            request.auth.uid in resource.data.connections ||
+            request.auth.uid == userId
+          )
+        )
+      );
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
       allow get: if isAdmin();
       
       // User status subcollection
-      match /status/{document=**} {
+      match /status/{document} {
         allow read: if isAuthenticated();
-        allow write: if request.auth.uid == userId;
+        allow write: if isAuthenticated() && request.auth.uid == userId;
       }
 
       // User connections subcollection
@@ -105,10 +115,16 @@ service cloud.firestore {
         resource.data.visibility == 'public' ||
         // Allow reading own posts
         resource.data.authorId == request.auth.uid ||
+        // Allow reading posts from users you follow when visibility is 'followers'
+        (resource.data.visibility == 'followers' && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.following.hasAny([resource.data.authorId])) ||
+        // Allow reading posts from connected users when visibility is 'connections'
+        (resource.data.visibility == 'connections' && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.connections.hasAny([resource.data.authorId])) ||
         // Allow admins to read all posts
         isAdmin()
       );
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
       allow update: if isAuthenticated() && (
         // Allow post author to update their own post
         resource.data.authorId == request.auth.uid ||
@@ -203,6 +219,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Status collection for online presence
+    match /status/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
     // Feed collection
     match /feed/{feedId} {
       allow read: if isAuthenticated();
@@ -217,19 +239,22 @@ service cloud.firestore {
 
     // Notifications collection
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isAdmin()
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && (
+        // Allow creating notifications for users you interact with
+        request.resource.data.userId != request.auth.uid && (
+          // Connection requests
+          (request.resource.data.type == 'connection_request' && exists(/databases/$(database)/documents/users/$(request.resource.data.userId))) ||
+          // Post interactions
+          (request.resource.data.type in ['post_like', 'post_comment'] && exists(/databases/$(database)/documents/posts/$(request.resource.data.postId))) ||
+          // Messages
+          (request.resource.data.type == 'new_message' && exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId))) ||
+          // Follows
+          (request.resource.data.type == 'new_follower' && exists(/databases/$(database)/documents/users/$(request.resource.data.userId)))
+        )
       );
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isAdmin()
-      );
-      allow delete: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isAdmin()
-      );
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // Conversations collection rules
@@ -265,6 +290,24 @@ service cloud.firestore {
         || resource.data.messageId in get(/databases/$(database)/documents/messages/$(resource.data.messageId)).data.participants);
       allow write: if isAuthenticated() 
         && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Connection requests collection
+    match /connectionRequests/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        isAdmin()
+      );
     }
   }
 } 
