@@ -1,47 +1,82 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Message, subscribeToMessages } from '../../config/supabase';
+import {
+  Box,
+  TextField,
+  IconButton,
+  Typography,
+  Avatar,
+  Paper,
+  CircularProgress,
+  useTheme,
+} from '@mui/material';
+import { Send as SendIcon } from '@mui/icons-material';
+import { Message } from '../../config/supabase';
 import { messageService } from '../../services/messageService';
 import { User } from '../../types/user';
-import { auth } from '../../config/firebase';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store/store';
+import { formatDistanceToNow } from 'date-fns';
 
 interface ChatWindowProps {
   conversationId: string;
   otherUser: User;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId, otherUser }) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId, otherUser }) => {
+  const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const currentUser = auth.currentUser;
+  const currentUser = useSelector((state: RootState) => state.auth.user);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
-    // Load existing messages
-    const loadMessages = async () => {
-      const messages = await messageService.getConversationMessages(conversationId);
-      setMessages(messages);
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    if (!conversationId || !currentUser) return;
+
+    setLoading(true);
+
+    // Initial fetch of messages
+    const fetchMessages = async () => {
+      try {
+        const fetchedMessages = await messageService.getConversationMessages(conversationId);
+        setMessages(fetchedMessages);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+        setLoading(false);
+      }
     };
 
-    loadMessages();
+    fetchMessages();
 
-    // Subscribe to new messages
-    const subscription = subscribeToMessages(conversationId, (message) => {
-      setMessages(prev => [...prev, message]);
-      // Mark message as read if it's for current user
-      if (message.receiver_id === currentUser?.uid) {
-        messageService.markMessagesAsRead(conversationId, currentUser.uid);
-      }
+    // Subscribe to real-time updates
+    const unsubscribe = messageService.subscribeToMessages(conversationId, (updatedMessages) => {
+      setMessages(updatedMessages);
     });
 
-    return () => {
-      subscription.unsubscribe();
+    // Mark messages as read
+    const markAsRead = async () => {
+      try {
+        await messageService.markMessagesAsRead(conversationId, currentUser.uid);
+      } catch (error) {
+        console.error('Error marking messages as read:', error);
+      }
     };
-  }, [conversationId, currentUser?.uid]);
 
-  useEffect(() => {
-    // Scroll to bottom when messages change
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    markAsRead();
+
+    return () => {
+      unsubscribe();
+    };
+  }, [conversationId, currentUser]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,8 +85,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId, otherUse
     try {
       await messageService.sendMessage(
         currentUser.uid,
-        otherUser.id,
-        newMessage,
+        otherUser.uid,
+        newMessage.trim(),
         conversationId
       );
       setNewMessage('');
@@ -60,62 +95,107 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId, otherUse
     }
   };
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center p-4 border-b">
-        <img
-          src={otherUser.photoURL || '/default-avatar.png'}
-          alt={otherUser.displayName}
-          className="w-10 h-10 rounded-full mr-3"
-        />
-        <div>
-          <h3 className="font-semibold">{otherUser.displayName}</h3>
-        </div>
-      </div>
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
-      <div className="flex-1 overflow-y-auto p-4">
+  return (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Chat Header */}
+      <Paper
+        elevation={1}
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          borderBottom: `1px solid ${theme.palette.divider}`,
+        }}
+      >
+        <Avatar src={otherUser.photoURL} alt={otherUser.displayName}>
+          {otherUser.displayName[0]?.toUpperCase()}
+        </Avatar>
+        <Box sx={{ ml: 2 }}>
+          <Typography variant="h6">{otherUser.displayName}</Typography>
+        </Box>
+      </Paper>
+
+      {/* Messages Area */}
+      <Box
+        sx={{
+          flex: 1,
+          overflow: 'auto',
+          p: 2,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {messages.map((message) => (
-          <div
+          <Box
             key={message.id}
-            className={`mb-4 flex ${
-              message.sender_id === currentUser?.uid ? 'justify-end' : 'justify-start'
-            }`}
+            sx={{
+              display: 'flex',
+              justifyContent: message.sender_id === currentUser?.uid ? 'flex-end' : 'flex-start',
+              mb: 1,
+            }}
           >
-            <div
-              className={`max-w-[70%] rounded-lg p-3 ${
-                message.sender_id === currentUser?.uid
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-200'
-              }`}
+            <Paper
+              elevation={1}
+              sx={{
+                p: 1,
+                px: 2,
+                maxWidth: '70%',
+                backgroundColor: message.sender_id === currentUser?.uid
+                  ? theme.palette.primary.main
+                  : theme.palette.grey[100],
+                color: message.sender_id === currentUser?.uid
+                  ? theme.palette.primary.contrastText
+                  : theme.palette.text.primary,
+              }}
             >
-              <p>{message.content}</p>
-              <span className="text-xs opacity-75">
-                {new Date(message.created_at).toLocaleTimeString()}
-              </span>
-            </div>
-          </div>
+              <Typography variant="body1">{message.content}</Typography>
+              <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                {formatDistanceToNow(new Date(message.created_at), { addSuffix: true })}
+              </Typography>
+            </Paper>
+          </Box>
         ))}
         <div ref={messagesEndRef} />
-      </div>
+      </Box>
 
-      <form onSubmit={handleSendMessage} className="border-t p-4">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type a message..."
-            className="flex-1 rounded-full border p-2 px-4 focus:outline-none focus:border-blue-500"
-          />
-          <button
-            type="submit"
-            disabled={!newMessage.trim()}
-            className="bg-blue-500 text-white rounded-full px-6 py-2 hover:bg-blue-600 disabled:opacity-50"
-          >
-            Send
-          </button>
-        </div>
-      </form>
-    </div>
+      {/* Message Input */}
+      <Paper
+        component="form"
+        onSubmit={handleSendMessage}
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          borderTop: `1px solid ${theme.palette.divider}`,
+        }}
+      >
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Type a message..."
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          sx={{ flex: 1 }}
+        />
+        <IconButton
+          color="primary"
+          type="submit"
+          disabled={!newMessage.trim()}
+        >
+          <SendIcon />
+        </IconButton>
+      </Paper>
+    </Box>
   );
-}; 
+};
+
+export default ChatWindow; 

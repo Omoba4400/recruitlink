@@ -33,7 +33,7 @@ import Header from '../components/layout/Header';
 import { messageService, Message, Conversation } from '../services/messageService';
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { ChatWindow } from '../components/chat/ChatWindow';
+import ChatWindow from '../components/chat/ChatWindow';
 import { User } from '../types/user';
 import { getUserProfile } from '../services/user.service';
 
@@ -78,6 +78,10 @@ const Messages: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
 
+  const getOtherParticipantId = (conversation: Conversation) => {
+    return conversation.participants.find(id => id !== user?.uid) || '';
+  };
+
   // Separate effect for fetching user profiles
   useEffect(() => {
     const fetchUserProfiles = async (conversations: Conversation[]) => {
@@ -99,7 +103,7 @@ const Messages: React.FC = () => {
     if (conversations.length > 0) {
       fetchUserProfiles(conversations);
     }
-  }, [conversations, user?.uid]);
+  }, [conversations, user?.uid, otherUsers]);
 
   // Effect for conversation subscription
   useEffect(() => {
@@ -142,10 +146,6 @@ const Messages: React.FC = () => {
     );
   });
 
-  const getOtherParticipantId = (conversation: Conversation) => {
-    return conversation.participants.find(id => id !== user?.uid) || '';
-  };
-
   const getSelectedConversation = () => {
     if (!selectedConversation || !conversations.length) return null;
     const conversation = conversations.find(c => c.id === selectedConversation);
@@ -168,7 +168,14 @@ const Messages: React.FC = () => {
         verificationStatus: 'none',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        socialLinks: {},
+        phoneNumber: '',
+        phoneVerified: false,
+        socialLinks: {
+          instagram: '',
+          twitter: '',
+          linkedin: '',
+          youtube: ''
+        },
         privacySettings: {
           profileVisibility: 'public',
           allowMessagesFrom: 'everyone',
@@ -263,10 +270,34 @@ const Messages: React.FC = () => {
         {/* Chat Area */}
         <ChatArea>
           {selectedConversation ? (
-            <ChatWindow
-              conversationId={selectedConversation}
-              otherUser={otherUsers.get(getOtherParticipantId(conversations.find(c => c.id === selectedConversation) || conversations[0])) as User}
-            />
+            (() => {
+              const conversation = conversations.find(c => c.id === selectedConversation);
+              const otherUser = conversation ? otherUsers.get(getOtherParticipantId(conversation)) : undefined;
+              
+              if (!otherUser) {
+                return (
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: '100%',
+                      color: 'text.secondary',
+                    }}
+                  >
+                    <Typography variant="h6">Loading conversation...</Typography>
+                  </Box>
+                );
+              }
+
+              return (
+                <ChatWindow
+                  conversationId={selectedConversation}
+                  otherUser={otherUser}
+                />
+              );
+            })()
           ) : (
             <Box
               sx={{

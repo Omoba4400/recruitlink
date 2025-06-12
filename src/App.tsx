@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { RootState } from './store/store';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -29,17 +29,7 @@ import AdminRoute from './components/routes/AdminRoute';
 import AdminRoutes from './routes/admin.routes';
 import PostView from './pages/PostView';
 import { supabase } from './config/supabase';
-
-// Protected Route component
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const user = useSelector((state: RootState) => state.auth.user);
-  
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-  
-  return <>{children}</>;
-};
+import PhoneVerification from './pages/PhoneVerification';
 
 const App: React.FC = () => {
   const chatContainerRef = useRef<MiniChatContainerRef>(null);
@@ -185,91 +175,41 @@ const App: React.FC = () => {
           }
         />
 
+        {/* Verification phone route */}
+        <Route
+          path="/verify-phone"
+          element={
+            user && emailVerified && !user.phoneVerified ? (
+              <PhoneVerification />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+
         {/* Protected routes */}
         <Route
-          path="/home"
-          element={
-            <ProtectedRoute>
-              {user && !emailVerified ? (
-                <Navigate to="/verify-email" replace />
-              ) : (
-                <Home />
-              )}
-            </ProtectedRoute>
-          }
-        />
-
-        {/* Post routes */}
-        <Route
-          path="/post/:postId"
-          element={
-            <PrivateRoute>
-              <PostView />
-            </PrivateRoute>
-          }
-        />
-
-        {/* Other protected routes */}
-        <Route
-          path="/profile/:userId"
-          element={
-            <PrivateRoute>
-              <Profile />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/view-profile/:userId"
-          element={
-            <PrivateRoute>
-              <ViewProfile />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <PrivateRoute>
-              <Settings />
-            </PrivateRoute>
-          }
-        />
-
-        {/* Admin routes */}
-        <Route path="/admin/*" element={<AdminRoutes />} />
-
-        {/* Add these new routes */}
-        <Route 
-          path="/verify" 
-          element={
-            <PrivateRoute>
-              <VerificationForm />
-            </PrivateRoute>
-          } 
-        />
-        
-        <Route 
-          path="/admin/verifications" 
-          element={
-            <AdminRoute>
-              <VerificationDashboard />
-            </AdminRoute>
-          } 
-        />
-
-        {/* Messages route */}
-        <Route
-          path="/messages"
           element={
             <PrivateRoute>
               {user && !emailVerified ? (
                 <Navigate to="/verify-email" replace />
+              ) : user && !user.phoneVerified ? (
+                <Navigate to="/verify-phone" replace />
               ) : (
-                <Messages />
+                <Outlet />
               )}
             </PrivateRoute>
           }
-        />
+        >
+          <Route path="/home" element={<Home />} />
+          <Route path="/post/:postId" element={<PostView />} />
+          <Route path="/profile/:userId" element={<Profile />} />
+          <Route path="/view-profile/:userId" element={<ViewProfile />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/messages" element={<Messages />} />
+          <Route path="/verify" element={<VerificationForm />} />
+          <Route path="/admin/*" element={<AdminRoutes />} />
+        </Route>
 
         {/* Catch all route */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -19,6 +19,7 @@ export interface Notification {
   postId?: string;      // For post-related notifications
   commentId?: string;   // For comment notifications
   messageId?: string;   // For message notifications
+  requestId?: string;   // For connection request notifications
   // Connection request specific fields
   receiverId?: string;
   status?: 'pending' | 'accepted' | 'rejected';

@@ -13,29 +13,37 @@ import {
   IconButton,
   useTheme,
   useMediaQuery,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
 } from '@mui/material';
 import { Home as HomeIcon } from '@mui/icons-material';
-import { loginUser, resendVerificationEmail } from '../services/auth.service';
+import { loginUser, resendVerificationEmail, sendPasswordResetEmail } from '../services/auth.service';
 import { setUser, setError as setAuthError } from '../store/slices/authSlice';
 import { useSnackbar } from 'notistack';
 import { User } from '../types/user';
 
 const formatUserData = (firebaseUser: any): User => {
-  return {
+  const timestamp = new Date().toISOString();
+  const userData: User = {
     id: firebaseUser.uid,
     uid: firebaseUser.uid,
     email: firebaseUser.email || '',
     displayName: firebaseUser.displayName || '',
     photoURL: firebaseUser.photoURL || undefined,
     userType: 'athlete',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    lastLogin: new Date().toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLogin: timestamp,
     bio: '',
     location: '',
     verified: false,
     blocked: false,
     emailVerified: firebaseUser.emailVerified,
+    phoneNumber: firebaseUser.phoneNumber || '',
+    phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
     privacySettings: {
@@ -54,8 +62,11 @@ const formatUserData = (firebaseUser: any): User => {
     },
     followers: [],
     following: [],
-    connections: []
+    connections: [],
+    blockedUsers: [],
+    messageThreads: []
   };
+  return userData;
 };
 
 const Login: React.FC = () => {
@@ -64,6 +75,10 @@ const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsVerification, setNeedsVerification] = useState(false);
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const theme = useTheme();
@@ -116,6 +131,36 @@ const Login: React.FC = () => {
       const errorMessage = err instanceof Error ? err.message : 'Failed to resend verification email';
       setError(errorMessage);
     }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!resetEmail) {
+      enqueueSnackbar('Please enter your email address', { variant: 'error' });
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(resetEmail)) {
+      enqueueSnackbar('Please enter a valid email address', { variant: 'error' });
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      await sendPasswordResetEmail(resetEmail);
+      setResetEmailSent(true);
+      enqueueSnackbar('Password reset email sent successfully', { variant: 'success' });
+    } catch (error) {
+      enqueueSnackbar(error instanceof Error ? error.message : 'Failed to send reset email', { variant: 'error' });
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleCloseForgotPassword = () => {
+    setForgotPasswordOpen(false);
+    setResetEmail('');
+    setResetEmailSent(false);
   };
 
   if (needsVerification) {
@@ -230,7 +275,14 @@ const Login: React.FC = () => {
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
-            <Box sx={{ textAlign: 'center' }}>
+            <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Link
+                component="button"
+                variant="body2"
+                onClick={() => setForgotPasswordOpen(true)}
+              >
+                Forgot password?
+              </Link>
               <Link component={RouterLink} to="/register" variant="body2">
                 {"Don't have an account? Sign Up"}
               </Link>
@@ -238,6 +290,52 @@ const Login: React.FC = () => {
           </Box>
         </Paper>
       </Box>
+
+      {/* Forgot Password Dialog */}
+      <Dialog 
+        open={forgotPasswordOpen} 
+        onClose={handleCloseForgotPassword}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          {resetEmailSent ? 'Check Your Email' : 'Reset Password'}
+        </DialogTitle>
+        <DialogContent>
+          {resetEmailSent ? (
+            <Typography>
+              We've sent password reset instructions to your email address. Please check your inbox and follow the link to reset your password.
+            </Typography>
+          ) : (
+            <TextField
+              autoFocus
+              margin="dense"
+              id="resetEmail"
+              label="Email Address"
+              type="email"
+              fullWidth
+              variant="outlined"
+              value={resetEmail}
+              onChange={(e) => setResetEmail(e.target.value)}
+              disabled={resetLoading}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseForgotPassword}>
+            {resetEmailSent ? 'Close' : 'Cancel'}
+          </Button>
+          {!resetEmailSent && (
+            <Button 
+              onClick={handleForgotPassword} 
+              variant="contained"
+              disabled={resetLoading}
+            >
+              {resetLoading ? <CircularProgress size={24} /> : 'Send Reset Link'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

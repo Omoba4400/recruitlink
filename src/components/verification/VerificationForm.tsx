@@ -71,6 +71,14 @@ const VerificationForm: React.FC = () => {
   const handleUploadDocuments = async () => {
     setLoading(true);
     setError(null);
+
+    // Check if at least one document is uploaded
+    if (!documents.studentId && !documents.athleteId && !documents.otherDocuments) {
+      setError('Please upload at least one verification document');
+      setLoading(false);
+      return;
+    }
+
     const urls: { [key: string]: string } = {};
 
     try {
@@ -81,6 +89,10 @@ const VerificationForm: React.FC = () => {
             urls[key] = url;
           }
         }
+      }
+
+      if (Object.keys(urls).length === 0) {
+        throw new Error('No documents were successfully uploaded');
       }
 
       setDocumentUrls(urls);
@@ -95,6 +107,13 @@ const VerificationForm: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!user) return;
+
+    // Validate that we have at least one document URL
+    if (Object.keys(documentUrls).length === 0) {
+      setError('Please upload at least one document before submitting');
+      setActiveStep(0); // Go back to upload step
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -111,7 +130,7 @@ const VerificationForm: React.FC = () => {
         userDetails: {
           displayName: user.displayName || '',
           email: user.email || '',
-          photoURL: user.photoURL || '', // Ensure photoURL is never undefined
+          photoURL: user.photoURL || '',
           userType: user.userType || 'athlete',
           location: user.location || '',
           bio: user.bio || ''
@@ -145,13 +164,21 @@ const VerificationForm: React.FC = () => {
     <Box>
       <Typography variant="h6" gutterBottom>Upload Required Documents</Typography>
       <Typography variant="body2" color="textSecondary" paragraph>
-        Please upload clear, high-quality images of the following documents:
+        Please upload at least one of the following documents to verify your identity:
       </Typography>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
       <Grid container spacing={3}>
         <Grid item xs={12} md={4}>
           <Card>
             <CardContent>
               <Typography variant="subtitle1" gutterBottom>Student ID</Typography>
+              <Typography variant="body2" color="textSecondary" paragraph>
+                Upload a clear photo of your student ID
+              </Typography>
               <Button
                 variant="outlined"
                 component="label"
@@ -173,6 +200,9 @@ const VerificationForm: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="subtitle1" gutterBottom>Athlete ID/License</Typography>
+              <Typography variant="body2" color="textSecondary" paragraph>
+                Upload your athlete ID or sports license
+              </Typography>
               <Button
                 variant="outlined"
                 component="label"
@@ -194,6 +224,9 @@ const VerificationForm: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="subtitle1" gutterBottom>Additional Documents</Typography>
+              <Typography variant="body2" color="textSecondary" paragraph>
+                Upload any other relevant verification documents
+              </Typography>
               <Button
                 variant="outlined"
                 component="label"
@@ -216,7 +249,7 @@ const VerificationForm: React.FC = () => {
         <Button
           variant="contained"
           onClick={handleUploadDocuments}
-          disabled={loading || !documents.studentId}
+          disabled={loading || (!documents.studentId && !documents.athleteId && !documents.otherDocuments)}
         >
           {loading ? <CircularProgress size={24} /> : 'Next'}
         </Button>

@@ -167,27 +167,42 @@ export interface UserProfile {
   email: string;
   displayName: string;
   photoURL?: string;
+  bannerURL?: string;
   userType: UserType;
-  verified: boolean;
-  blocked: boolean;
   createdAt: string;
   updatedAt: string;
-  location?: string;
-  bio?: string;
+  lastLogin: string;
+  bio: string;
+  location: string;
+  verified: boolean;
+  blocked: boolean;
+  emailVerified: boolean;
+  phoneNumber?: string;
+  phoneVerified: boolean;
+  isAdmin: boolean;
+  verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
+  privacySettings: {
+    profileVisibility: 'public' | 'private' | 'connections';
+    allowMessagesFrom: 'everyone' | 'connections' | 'none';
+    showEmail: boolean;
+    showLocation: boolean;
+    showAcademicInfo: boolean;
+    showAthleteStats: boolean;
+  };
+  socialLinks: {
+    instagram: string;
+    twitter: string;
+    linkedin: string;
+    youtube: string;
+  };
+  followers: string[];
+  following: string[];
+  connections: string[];
   athleteInfo?: AthleteInfo;
   coachInfo?: CoachInfo;
   teamInfo?: TeamInfo;
   sponsorInfo?: SponsorInfo;
   mediaInfo?: MediaInfo;
-  following?: string[];
-  followers?: string[];
-  interests?: string[];
-  privacySettings: PrivacySettings;
-  socialLinks: SocialLinks;
-  verificationStatus?: 'none' | 'pending' | 'approved' | 'rejected';
-  posts?: Post[];
-  groups?: string[];
-  connections: string[];
   matchScore?: number;
   collegeInfo?: CollegeInfo;
 }
@@ -195,9 +210,6 @@ export interface UserProfile {
 // Full user interface including auth-related fields
 export interface User extends UserProfile {
   id: string;
-  emailVerified: boolean;
-  lastLogin: string;
-  isAdmin: boolean;
   blockedUsers?: string[];
   messageThreads?: string[];
 }

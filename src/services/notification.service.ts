@@ -18,6 +18,8 @@ const NOTIFICATIONS_COLLECTION = 'notifications';
 
 export const getNotifications = async (userId: string, limitCount?: number): Promise<NotificationWithSender[]> => {
   try {
+    console.log('Fetching notifications for user:', userId);
+    
     const constraints: QueryConstraint[] = [
       where('userId', '==', userId),
       orderBy('createdAt', 'desc'),
@@ -33,6 +35,8 @@ export const getNotifications = async (userId: string, limitCount?: number): Pro
     );
 
     const snapshot = await getDocs(q);
+    console.log('Found notifications:', snapshot.size);
+    
     const notifications = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
@@ -41,8 +45,10 @@ export const getNotifications = async (userId: string, limitCount?: number): Pro
     // Fetch sender details for notifications that have senderId
     const notificationsWithSenders = await Promise.all(
       notifications.map(async (notification) => {
+        console.log('Processing notification:', notification);
         if (notification.senderId) {
           const sender = await getUserProfile(notification.senderId);
+          console.log('Sender for notification:', sender);
           return {
             ...notification,
             sender: sender ? {
@@ -57,6 +63,7 @@ export const getNotifications = async (userId: string, limitCount?: number): Pro
       })
     );
 
+    console.log('Processed notifications with senders:', notificationsWithSenders);
     return notificationsWithSenders;
   } catch (error) {
     console.error('Error getting notifications:', error);

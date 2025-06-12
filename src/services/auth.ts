@@ -24,6 +24,8 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     blocked: false,
     isAdmin: false,
     emailVerified: firebaseUser.emailVerified,
+    phoneNumber: firebaseUser.phoneNumber || '',
+    phoneVerified: false,
     socialLinks: {
       instagram: '',
       twitter: '',

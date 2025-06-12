@@ -71,6 +71,23 @@ import {
   Settings,
   Cancel as CancelIcon,
   Delete as DeleteIcon,
+  School,
+  Work,
+  Star,
+  Timeline,
+  Lightbulb,
+  Sports,
+  MenuBook,
+  Assignment,
+  Cake,
+  Email,
+  Phone,
+  Language,
+  Public,
+  Lock,
+  People,
+  PersonAdd,
+  MoreHoriz,
 } from '@mui/icons-material';
 import Header from '../components/layout/Header';
 import { uploadToCloudinary } from '../config/cloudinary';
@@ -106,7 +123,8 @@ import {
   deletePost,
   updatePost,
   sharePost,
-  getUserPosts
+  getUserPosts,
+  getPost
 } from '../services/post.service';
 import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { doc, setDoc } from 'firebase/firestore';
@@ -291,11 +309,11 @@ const PostsTab: React.FC<PostsTabProps> = ({
 
   useEffect(() => {
     const loadPosts = async () => {
-      if (!isInitialLoad) return;
-      
       try {
+        console.log('Loading posts for user:', userId);
         setLoading(true);
         const fetchedPosts = await getUserPosts(userId);
+        console.log('Fetched posts:', fetchedPosts);
         setPosts(fetchedPosts.posts);
         setLastVisible(fetchedPosts.lastVisible);
         setHasMorePosts(fetchedPosts.hasMore);
@@ -304,12 +322,16 @@ const PostsTab: React.FC<PostsTabProps> = ({
         enqueueSnackbar('Failed to load posts', { variant: 'error' });
       } finally {
         setLoading(false);
-        setIsInitialLoad(false);
       }
     };
 
-    loadPosts();
-  }, [userId, isInitialLoad, enqueueSnackbar, setLoading, setPosts, setHasMorePosts, setLastVisible]);
+    if (userId) {
+      console.log('Starting post load for user:', userId);
+      loadPosts();
+    } else {
+      console.log('No userId available, skipping post load');
+    }
+  }, [userId, enqueueSnackbar, setLoading, setPosts, setHasMorePosts, setLastVisible]);
 
   const handleLoadMore = async () => {
     if (!hasMorePosts || loading) return;
@@ -498,10 +520,17 @@ const Profile: React.FC = () => {
   const [selectedPost, setSelectedPost] = useState<string>('');
   const [posts, setPosts] = useState<PostWithAuthor[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bannerFileInputRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
   const lastPostRef = useRef<any>(null);
   const [lastVisible, setLastVisible] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const postsLoadedRef = useRef(false);
+  const [openPostDialog, setOpenPostDialog] = useState(false);
+  const [newPostContent, setNewPostContent] = useState('');
+  const [newPostMedia, setNewPostMedia] = useState<File[]>([]);
+  const [postMediaPreviews, setPostMediaPreviews] = useState<string[]>([]);
+  const [isPostingLoading, setIsPostingLoading] = useState(false);
+  const postMediaInputRef = useRef<HTMLInputElement>(null);
 
   // Memoize the PostsTab component props
   const postsTabProps = React.useMemo(() => ({
@@ -659,45 +688,45 @@ const Profile: React.FC = () => {
     );
   }
 
-  const handleProfileUpdate = async (updatedData: Partial<UserProfile>) => {
+  const handleProfileUpdate = (updatedData: Partial<UserProfile>) => {
     if (!profileData) return;
 
-    try {
-      // Only update Firestore and exit edit mode if Save button is clicked
-      if (!isEditing) return;
+    // Only update local state
+    const newProfileData: UserProfile = {
+      ...profileData,
+      ...updatedData,
+      updatedAt: new Date().toISOString()
+    };
 
-      const newProfileData: UserProfile = {
-        ...profileData,
-        ...updatedData,
-        updatedAt: new Date().toISOString()
-      };
-
-      await updateUserProfile(newProfileData.uid, newProfileData);
-      setProfileData(newProfileData);
-      // Don't set isEditing to false here - let the Save button handle that
-    } catch (error) {
-      console.error('Error updating profile:', error);
-      enqueueSnackbar('Failed to update profile', { variant: 'error' });
-    }
+    setProfileData(newProfileData);
   };
 
   const handleSaveProfile = async () => {
     try {
-      if (!profileData) return;
+      if (!profileData || !user) return;
+      
+      // Save to Firebase and update Redux only when actually saving
       await updateUserProfile(profileData.uid, profileData);
+      dispatch(setProfile(profileData));
       setIsEditing(false);
-      enqueueSnackbar('Profile updated successfully', { variant: 'success' });
+      enqueueSnackbar('Profile saved successfully', { variant: 'success' });
     } catch (error) {
       console.error('Error saving profile:', error);
       enqueueSnackbar('Failed to save profile', { variant: 'error' });
     }
   };
 
-  const handleEditToggle = (): void => {
-    setIsEditing(!isEditing);
+  const handleEditToggle = () => {
+    if (isEditing) {
+      // If we're currently editing, save changes
+      handleSaveProfile();
+    } else {
+      // If we're not editing, enter edit mode
+      setIsEditing(true);
+    }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video' = 'image'): Promise<void> => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video' | 'banner' = 'image'): Promise<void> => {
     if (!profileData || !user) return;
 
     const file = event.target.files?.[0];
@@ -705,51 +734,34 @@ const Profile: React.FC = () => {
 
     setUploading(true);
     try {
-      const url = await uploadToCloudinary(file, type);
+      const url = await uploadToCloudinary(file, type === 'banner' ? 'image' : type);
       if (!url || typeof url !== 'string') {
         throw new Error('Failed to get upload URL');
       }
 
-      if (type === 'image') {
-        // Update profile picture
-        const updatedData: UserProfile = {
-          ...profileData,
-          photoURL: url,
-          updatedAt: new Date().toISOString(),
+      let updatedData: Partial<UserProfile> = {};
+
+      if (type === 'banner') {
+        updatedData = { bannerURL: url };
+      } else if (type === 'image') {
+        updatedData = { photoURL: url };
+      } else if (type === 'video' && profileData.userType === 'athlete' && profileData.athleteInfo) {
+        updatedData = {
+          athleteInfo: {
+            ...profileData.athleteInfo,
+            achievements: [...(profileData.athleteInfo.achievements || [])]
+          }
         };
-        handleProfileUpdate(updatedData);
-        
-        // Update user profile in Firebase
-        await updateUserProfile(user.uid, { photoURL: url });
-        
-        // Update Redux store with the current user's profile data
-        dispatch(setProfile(updatedData));
-        
-        enqueueSnackbar('Profile picture updated successfully', { variant: 'success' });
-      } else {
-        // Handle video upload for athlete highlights
-        if (profileData.userType === 'athlete' && profileData.athleteInfo) {
-          const updatedData: UserProfile = {
-            ...profileData,
-            athleteInfo: {
-              ...profileData.athleteInfo,
-              achievements: [...(profileData.athleteInfo.achievements || [])]
-            },
-            updatedAt: new Date().toISOString(),
-          };
-          handleProfileUpdate(updatedData);
-          
-          // Update achievements in Firebase
-          await updateUserProfile(user.uid, {
-            athleteInfo: updatedData.athleteInfo,
-          });
-          
-          // Update Redux store with the current user's profile data
-          dispatch(setProfile(updatedData));
-          
-          enqueueSnackbar('Video uploaded successfully', { variant: 'success' });
-        }
       }
+
+      // Update local state
+      handleProfileUpdate(updatedData);
+
+      // Save to Firebase and update Redux
+      await updateUserProfile(user.uid, updatedData);
+      dispatch(setProfile({ ...profileData, ...updatedData }));
+
+      enqueueSnackbar(`${type.charAt(0).toUpperCase() + type.slice(1)} updated successfully`, { variant: 'success' });
     } catch (error) {
       console.error('Upload failed:', error);
       enqueueSnackbar('Failed to upload file. Please try again.', { variant: 'error' });
@@ -759,6 +771,10 @@ const Profile: React.FC = () => {
   };
 
   const handleVerificationRequest = () => {
+    if (!profileData) return;
+    
+    // Just navigate to verification page without changing status
+    // Status will be updated after documents are uploaded
     navigate('/verify');
   };
 
@@ -795,524 +811,395 @@ const Profile: React.FC = () => {
     }
   };
 
-  const renderProfilePictureUpload = (): JSX.Element | null => {
-    if (!profileData) return null;
+  const handlePostDialogClose = () => {
+    setOpenPostDialog(false);
+    setNewPostContent('');
+    setNewPostMedia([]);
+    setPostMediaPreviews([]);
+  };
 
-    return (
-      <Badge
-        overlap="circular"
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        badgeContent={
+  const handlePostMediaSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    setNewPostMedia(prevMedia => [...prevMedia, ...files]);
+    
+    // Create preview URLs for the selected media
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPostMediaPreviews(prev => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleRemoveMedia = (index: number) => {
+    setNewPostMedia(prev => prev.filter((_, i) => i !== index));
+    setPostMediaPreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleCreatePost = async () => {
+    if (!user || !profileData || !newPostContent.trim()) return;
+
+    setIsPostingLoading(true);
+    try {
+      // Upload media files if any
+      const mediaUrls = [];
+      for (const mediaFile of newPostMedia) {
+        const url = await uploadToCloudinary(mediaFile, mediaFile.type.startsWith('video/') ? 'video' : 'image');
+        if (url) mediaUrls.push(url);
+      }
+
+      // Create the post
+      const postId = await createPost(user.uid, {
+        content: newPostContent,
+        media: mediaUrls.map(url => ({
+          id: url,
+          type: 'image',
+          url: url,
+          path: url,
+          filename: 'uploaded-media'
+        })),
+        visibility: 'public'
+      });
+
+      if (postId) {
+        // Get the created post with author info
+        const newPost = await getPost(postId);
+        if (newPost) {
+          // Update posts list
+          setPosts(prevPosts => [newPost, ...prevPosts]);
+          
+          handlePostDialogClose();
+          enqueueSnackbar('Post created successfully', { variant: 'success' });
+        }
+      }
+    } catch (error) {
+      console.error('Error creating post:', error);
+      enqueueSnackbar('Failed to create post', { variant: 'error' });
+    } finally {
+      setIsPostingLoading(false);
+    }
+  };
+
+  const renderProfileHeader = () => (
+    <Box>
+      {/* Banner Section */}
+      <Box
+        sx={{
+          position: 'relative',
+          height: '200px',
+          bgcolor: 'grey.200',
+          borderRadius: '8px 8px 0 0',
+          backgroundImage: profileData?.bannerURL ? `url(${profileData.bannerURL})` : 'none',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          mb: 2
+        }}
+      >
+        {isOwnProfile && (
           <IconButton
-            size="small"
-            sx={{ bgcolor: 'background.paper' }}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            sx={{
+              position: 'absolute',
+              right: 16,
+              top: 16,
+              bgcolor: 'background.paper',
+              '&:hover': { bgcolor: 'background.paper' }
+            }}
+            onClick={() => {
+              if (bannerFileInputRef.current) {
+                bannerFileInputRef.current.click();
+              }
+            }}
           >
             {uploading ? (
               <CircularProgress size={24} />
             ) : (
-              <EditIcon fontSize="small" />
+              <EditIcon />
             )}
           </IconButton>
-        }
-      >
-        <Avatar
-          sx={{ width: 120, height: 120 }}
-          src={profileData.photoURL || undefined}
-        >
-          {profileData.displayName?.[0]}
-        </Avatar>
+        )}
         <input
           type="file"
-          ref={fileInputRef}
+          ref={bannerFileInputRef}
           style={{ display: 'none' }}
           accept="image/*"
-          onChange={(e) => handleFileUpload(e, 'image')}
+          onChange={(e) => handleFileUpload(e, 'banner')}
         />
-      </Badge>
-    );
-  };
+      </Box>
 
-  const renderSocialLinks = (): JSX.Element => {
-    if (!profileData?.socialLinks) return <></>;
-
-    return (
-      <>
-        {Object.entries(profileData.socialLinks).map(([platform, url]) => (
-          <ListItem key={platform}>
-            <ListItemAvatar>
-              <IconButton 
-                onClick={() => handleSocialLinkClick(platform)}
-                sx={{ 
-                  '&:hover': { 
-                    transform: 'scale(1.1)',
-                    transition: 'transform 0.2s'
-                  } 
+      {/* Profile Info Section */}
+      <Box sx={{ px: 3, pb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', position: 'relative' }}>
+          {/* Profile Picture Section - Positioned to overlap banner */}
+          <Box sx={{ 
+            position: 'relative',
+            mt: '-85px', // Pull up to overlap with banner
+            mb: 2,
+            display: 'flex',
+            alignItems: 'flex-end'
+          }}>
+            <Badge
+              overlap="circular"
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              badgeContent={
+                isOwnProfile && (
+                  <IconButton
+                    size="small"
+                    sx={{
+                      bgcolor: 'background.paper',
+                      boxShadow: 1,
+                      '&:hover': { bgcolor: 'background.paper' }
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <CircularProgress size={24} />
+                    ) : (
+                      <EditIcon fontSize="small" />
+                    )}
+                  </IconButton>
+                )
+              }
+            >
+              <Avatar
+                sx={{
+                  width: 150,
+                  height: 150,
+                  border: '4px solid white',
+                  boxShadow: 1
                 }}
-                disabled={loading}
+                src={profileData?.photoURL || undefined}
               >
-                <Avatar sx={{ 
-                  bgcolor: url ? 'success.main' : 'primary.main',
-                  opacity: loading ? 0.7 : 1
-                }}>
-                  {loading ? (
-                    <CircularProgress size={24} color="inherit" />
-                  ) : (
-                    <>
-                      {platform === 'instagram' && <InstagramIcon />}
-                      {platform === 'twitter' && <TwitterIcon />}
-                      {platform === 'linkedin' && <LinkedInIcon />}
-                    </>
-                  )}
-                </Avatar>
-              </IconButton>
-            </ListItemAvatar>
-            <ListItemText
-              primary={
-                <Box display="flex" alignItems="center">
-                  <Typography>
-                    {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                {profileData?.displayName?.[0]}
+              </Avatar>
+              <input
+                type="file"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                accept="image/*"
+                onChange={(e) => handleFileUpload(e, 'image')}
+              />
+            </Badge>
+
+            {/* Name and Title Section */}
+            <Box sx={{ ml: 3, mb: 1 }}>
+              {isEditing ? (
+                <TextField
+                  fullWidth
+                  value={profileData?.displayName || ''}
+                  onChange={(e) => handleProfileUpdate({ displayName: e.target.value })}
+                  sx={{ mb: 1 }}
+                />
+              ) : (
+                <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                  {profileData?.displayName || 'Anonymous'}
+                </Typography>
+              )}
+              <Typography variant="subtitle1" color="text.secondary" sx={{ mt: 0.5 }}>
+                {profileData?.userType.charAt(0).toUpperCase() + profileData?.userType.slice(1)}
+              </Typography>
+              {profileData?.location && (
+                <Box display="flex" alignItems="center" sx={{ mt: 1 }}>
+                  <LocationOn sx={{ fontSize: 20, mr: 0.5, color: 'text.secondary' }} />
+                  <Typography variant="body2" color="text.secondary">
+                    {profileData.location}
                   </Typography>
-                  {url && (
-                    <Tooltip title="Account linked">
-                      <Check sx={{ ml: 1, color: 'success.main', fontSize: 16 }} />
-                    </Tooltip>
-                  )}
-                </Box>
-              }
-              secondary={
-                <Typography variant="body2" color="textSecondary">
-                  {url ? (
-                    <Link href={url} target="_blank" rel="noopener noreferrer">
-                      View Profile
-                    </Link>
-                  ) : (
-                    'Click icon to link account'
-                  )}
-                </Typography>
-              }
-            />
-          </ListItem>
-        ))}
-      </>
-    );
-  };
-
-  const renderVerificationStatus = () => {
-    if (!profileData) return null;
-
-    const isPending = profileData.verificationStatus === 'pending';
-    const isApproved = profileData.verificationStatus === 'approved';
-    const isRejected = profileData.verificationStatus === 'rejected';
-
-    return (
-      <Box sx={{ width: '100%' }}>
-        <Paper sx={{ p: 3 }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Box display="flex" alignItems="center">
-              <Verified 
-                color={isApproved ? "primary" : "action"} 
-                sx={{ mr: 1 }} 
-              />
-              <Box>
-                <Typography variant="h6">Verification Status</Typography>
-                <Typography variant="body2" color="textSecondary">
-                  {isPending && "Your verification request is being reviewed"}
-                  {isApproved && "Your profile is verified"}
-                  {isRejected && "Your verification request was rejected"}
-                  {profileData.verificationStatus === 'none' && "Request verification to get a blue checkmark"}
-                </Typography>
-              </Box>
-            </Box>
-            {!isApproved && (
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<Verified />}
-                onClick={handleVerificationRequest}
-                disabled={isPending}
-              >
-                {isPending ? 'Pending Review' : 'Request Verification'}
-              </Button>
-            )}
-          </Box>
-        </Paper>
-      </Box>
-    );
-  };
-
-  const renderTeamFields = () => {
-    if (!profileData?.teamInfo) return null;
-
-    const teamInfo = profileData.teamInfo;
-    const fields = [
-      { key: 'teamName', label: 'Team Name', icon: <Group /> },
-      { key: 'sport', label: 'Sport', icon: <Business /> },
-      { key: 'achievements', label: 'Achievements', icon: <EmojiEvents /> },
-      { key: 'openPositions', label: 'Open Positions', icon: <Group /> }
-    ] as const;
-
-    return (
-      <Box>
-        <Typography variant="h6" gutterBottom>
-          Team Information
-        </Typography>
-        <List>
-          {fields.map(({ key, label, icon }) => (
-            <ListItem key={key}>
-              <ListItemIcon>
-                {icon}
-              </ListItemIcon>
-              <ListItemText
-                primary={label}
-                secondary={
-                  Array.isArray(teamInfo[key])
-                    ? (teamInfo[key] as string[]).join(', ') || 'None'
-                    : teamInfo[key] || 'Not specified'
-                }
-              />
-            </ListItem>
-          ))}
-        </List>
-      </Box>
-    );
-  };
-
-  const renderTeamContent = () => {
-    if (!profileData) return null;
-
-    switch (profileData.userType) {
-      case 'athlete':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {renderAthleteFields()}
-          </Box>
-        );
-      case 'coach':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {renderCoachFields()}
-          </Box>
-        );
-      case 'team':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {renderTeamFields()}
-          </Box>
-        );
-      case 'sponsor':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* Sponsor-specific content */}
-          </Box>
-        );
-      case 'media':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* Media-specific content */}
-          </Box>
-        );
-      case 'college':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* College-specific content */}
-          </Box>
-        );
-      default:
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            <Typography>No additional information available</Typography>
-          </Box>
-        );
-    }
-  };
-
-  console.log('Rendering profile with data:', profileData);
-
-  // Don't show connect/follow buttons if viewing own profile
-  const isOwnProfile = user?.uid === profileData.uid;
-
-  const renderOverviewTab = (): JSX.Element => (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-      {/* Bio Section */}
-      <Box sx={{ width: '100%' }}>
-        <Paper sx={{ p: 3 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h6">About</Typography>
-            {!isEditing ? (
-              <IconButton onClick={() => setIsEditing(true)}>
-                <EditIcon />
-              </IconButton>
-            ) : (
-              <IconButton onClick={() => {
-                handleProfileUpdate(profileData);
-                setIsEditing(false);
-              }} color="primary">
-                <SaveIcon />
-              </IconButton>
-            )}
-          </Box>
-          {isEditing ? (
-            <>
-              <TextField
-                fullWidth
-                multiline
-                rows={4}
-                value={profileData.bio || ''}
-                onChange={(e) => handleProfileUpdate({ bio: e.target.value })}
-                placeholder="Tell us about yourself..."
-                sx={{ mb: 2 }}
-              />
-              <LocationAutocomplete
-                value={profileData.location || ''}
-                onChange={(location) => handleProfileUpdate({ location })}
-                disabled={!isEditing}
-              />
-            </>
-          ) : (
-            <>
-              <Typography sx={{ mb: 2 }}>{profileData.bio || 'No bio added yet.'}</Typography>
-              {profileData.location && (
-                <Box display="flex" alignItems="center">
-                  <LocationOn sx={{ mr: 1, color: 'action.active' }} />
-                  <Typography color="textSecondary">{profileData.location}</Typography>
                 </Box>
               )}
-            </>
+            </Box>
+          </Box>
+
+          {/* Edit Profile Button */}
+          {isOwnProfile && (
+            <Box sx={{ mt: 2 }}>
+              <Button
+                variant="contained"
+                startIcon={isEditing ? <SaveIcon /> : <EditIcon />}
+                onClick={handleEditToggle}
+              >
+                {isEditing ? 'Save Changes' : 'Edit Profile'}
+              </Button>
+            </Box>
           )}
-        </Paper>
+        </Box>
       </Box>
+    </Box>
+  );
 
-      {/* Role-Specific Details Section */}
-      <Box sx={{ width: { xs: '100%', md: '48%' } }}>
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>Details</Typography>
-          {renderTeamContent()}
-        </Paper>
-      </Box>
-
-      {/* Social Links Section */}
-      <Box sx={{ width: { xs: '100%', md: '48%' } }}>
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>Social Media</Typography>
-          <Typography variant="body2" color="textSecondary" paragraph>
-            Click on the social media icons to set up your profiles
+  const renderAboutSection = () => (
+    <Paper sx={{ p: 3, mb: 2 }}>
+      <Typography variant="h6" gutterBottom>About</Typography>
+      {isEditing ? (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            value={profileData?.bio || ''}
+            onChange={(e) => handleProfileUpdate({ bio: e.target.value })}
+            placeholder="Tell us about yourself..."
+          />
+          <LocationAutocomplete
+            value={profileData?.location || ''}
+            onChange={(location) => handleProfileUpdate({ location })}
+          />
+        </Box>
+      ) : (
+        <>
+          <Typography paragraph>
+            {profileData?.bio || 'No bio added yet.'}
           </Typography>
-          <List>
-            {renderSocialLinks()}
-          </List>
-        </Paper>
-      </Box>
-
-      {/* Verification Status */}
-      {renderVerificationStatus()}
-    </Box>
+          {profileData?.location && (
+            <Box display="flex" alignItems="center">
+              <LocationOn sx={{ mr: 1, color: 'action.active' }} />
+              <Typography color="textSecondary">{profileData.location}</Typography>
+            </Box>
+          )}
+        </>
+      )}
+    </Paper>
   );
 
-  const renderPostsTab = (): JSX.Element => {
-    const currentUserId = id || user?.uid;
-    if (!currentUserId) {
-      return (
-        <Box textAlign="center" my={4}>
-          <Typography variant="h6" color="text.secondary">
-            Please sign in to view posts
-          </Typography>
-        </Box>
-      );
-    }
-    
-    return (
-      <PostsTab
-        userId={currentUserId}
-        isOwnProfile={currentUserId === user?.uid}
-        userType={profileData.userType}
-        loading={postsLoading}
-        setLoading={setPostsLoading}
-        hasMorePosts={hasMorePosts}
-        setHasMorePosts={setHasMorePosts}
-        editPost={editPost}
-        setEditPost={setEditPost}
-        showDeleteDialog={showDeleteDialog}
-        setShowDeleteDialog={setShowDeleteDialog}
-        selectedPost={selectedPost}
-        setSelectedPost={setSelectedPost}
-        posts={posts}
-        setPosts={setPosts}
-        lastVisible={lastVisible}
-        setLastVisible={setLastVisible}
-      />
-    );
-  };
-
-  const renderEventsTab = (): JSX.Element => (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h6">Events</Typography>
-        {profileData?.userType !== 'athlete' && (
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-          >
-            Create Event
-          </Button>
-        )}
-      </Box>
-      <Box textAlign="center" my={4}>
-        <Typography variant="body1" color="text.secondary">
-          No events available
-        </Typography>
-      </Box>
-    </Box>
-  );
-
-  const renderConnectionsTab = (): JSX.Element => (
-    <Box>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-        <Box sx={{ width: { xs: '100%', md: '31%' } }}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>Connected</Typography>
-            <Box textAlign="center" my={4}>
-              <Typography variant="body1" color="text.secondary">
-                No connections yet
-              </Typography>
-            </Box>
-          </Paper>
-        </Box>
-        <Box sx={{ width: { xs: '100%', md: '31%' } }}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>Followers</Typography>
-            <Box textAlign="center" my={4}>
-              <Typography variant="body1" color="text.secondary">
-                No followers yet
-              </Typography>
-            </Box>
-          </Paper>
-        </Box>
-        <Box sx={{ width: { xs: '100%', md: '31%' } }}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>Following</Typography>
-            <Box textAlign="center" my={4}>
-              <Typography variant="body1" color="text.secondary">
-                Not following anyone yet
-              </Typography>
-            </Box>
-          </Paper>
-        </Box>
-      </Box>
-    </Box>
-  );
-
-  const renderRoleSpecificContent = (): JSX.Element | null => {
-    if (!profileData) return null;
-
-    switch (profileData.userType) {
-      case 'athlete':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* Athlete-specific content */}
-          </Box>
-        );
-      case 'coach':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* Coach-specific content */}
-          </Box>
-        );
-      case 'team':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {renderTeamFields()}
-          </Box>
-        );
-      case 'sponsor':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* Sponsor-specific content */}
-          </Box>
-        );
-      case 'media':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* Media-specific content */}
-          </Box>
-        );
-      case 'college':
-        return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-            {/* College-specific content */}
-          </Box>
-        );
-      default:
-        return null;
-    }
-  };
-
-  const renderAthleteFields = (): JSX.Element | null => {
+  const renderAthleteFields = () => {
     if (!profileData || profileData.userType !== 'athlete') return null;
 
     const athleteInfo = profileData.athleteInfo || defaultAthleteInfo;
 
     return (
-      <Box sx={{ width: '100%' }}>
-        <Typography variant="h6" gutterBottom>Athletic Information</Typography>
-        <Grid container spacing={3}>
-          {/* Sports & Position */}
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="subtitle1" gutterBottom>Primary Sport</Typography>
-              {isEditing ? (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Sport"
-                    value={athleteInfo.sports[0].sport}
-                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], sport: e.target.value }])}
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Position"
-                    value={athleteInfo.sports[0].position}
-                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], position: e.target.value }])}
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Level"
-                    value={athleteInfo.sports[0].level}
-                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], level: e.target.value }])}
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    type="number"
-                    label="Years of Experience"
-                    value={athleteInfo.sports[0].experience}
-                    onChange={(e) => handleAthleteInfoChange('sports', [{ ...athleteInfo.sports[0], experience: Number(e.target.value) }])}
-                  />
-                </Box>
-              ) : (
-                <List dense>
-                  <ListItem>
-                    <ListItemText primary="Sport" secondary={athleteInfo.sports[0].sport || 'Not specified'} />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText primary="Position" secondary={athleteInfo.sports[0].position || 'Not specified'} />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText primary="Level" secondary={athleteInfo.sports[0].level || 'Not specified'} />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText primary="Experience" secondary={`${athleteInfo.sports[0].experience || 0} years`} />
-                  </ListItem>
-                </List>
-              )}
-            </Paper>
-          </Grid>
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          {isEditing ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                fullWidth
+                label="Sport"
+                value={athleteInfo.sports[0].sport}
+                onChange={(e) => handleAthleteInfoChange('sports', [
+                  { ...athleteInfo.sports[0], sport: e.target.value }
+                ])}
+              />
+              <TextField
+                fullWidth
+                label="Position"
+                value={athleteInfo.sports[0].position}
+                onChange={(e) => handleAthleteInfoChange('sports', [
+                  { ...athleteInfo.sports[0], position: e.target.value }
+                ])}
+              />
+              <TextField
+                fullWidth
+                label="Level"
+                value={athleteInfo.sports[0].level}
+                onChange={(e) => handleAthleteInfoChange('sports', [
+                  { ...athleteInfo.sports[0], level: e.target.value }
+                ])}
+              />
+              <TextField
+                fullWidth
+                type="number"
+                label="Years of Experience"
+                value={athleteInfo.sports[0].experience}
+                onChange={(e) => handleAthleteInfoChange('sports', [
+                  { ...athleteInfo.sports[0], experience: Number(e.target.value) }
+                ])}
+              />
+            </Box>
+          ) : (
+            <List disablePadding>
+              <ListItem>
+                <ListItemIcon><Sports /></ListItemIcon>
+                <ListItemText 
+                  primary="Sport"
+                  secondary={athleteInfo.sports[0].sport || 'Not specified'}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon><Assignment /></ListItemIcon>
+                <ListItemText 
+                  primary="Position"
+                  secondary={athleteInfo.sports[0].position || 'Not specified'}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon><TrendingUp /></ListItemIcon>
+                <ListItemText 
+                  primary="Level"
+                  secondary={athleteInfo.sports[0].level || 'Not specified'}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon><Timeline /></ListItemIcon>
+                <ListItemText 
+                  primary="Experience"
+                  secondary={`${athleteInfo.sports[0].experience || 0} years`}
+                />
+              </ListItem>
+            </List>
+          )}
         </Grid>
-      </Box>
+
+        {/* Academic Information */}
+        <Grid item xs={12}>
+          <Typography variant="subtitle1" sx={{ mt: 2, mb: 1, fontWeight: 600 }}>Academic Information</Typography>
+          {isEditing ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                fullWidth
+                label="School"
+                value={athleteInfo.academicInfo.currentSchool || ''}
+                onChange={(e) => handleAthleteInfoChange('academicInfo', {
+                  ...athleteInfo.academicInfo,
+                  currentSchool: e.target.value
+                })}
+              />
+              <TextField
+                fullWidth
+                label="Graduation Year"
+                value={athleteInfo.academicInfo.graduationYear || ''}
+                onChange={(e) => handleAthleteInfoChange('academicInfo', {
+                  ...athleteInfo.academicInfo,
+                  graduationYear: e.target.value
+                })}
+              />
+            </Box>
+          ) : (
+            <List disablePadding>
+              <ListItem>
+                <ListItemIcon><School /></ListItemIcon>
+                <ListItemText
+                  primary="Current School"
+                  secondary={athleteInfo.academicInfo.currentSchool || 'Not specified'}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon><CalendarMonth /></ListItemIcon>
+                <ListItemText
+                  primary="Graduation Year"
+                  secondary={athleteInfo.academicInfo.graduationYear || 'Not specified'}
+                />
+              </ListItem>
+            </List>
+          )}
+        </Grid>
+
+        {/* Achievements Section */}
+        <Grid item xs={12}>
+          <Typography variant="subtitle1" sx={{ mt: 2, mb: 1, fontWeight: 600 }}>Achievements</Typography>
+          {athleteInfo.achievements && athleteInfo.achievements.length > 0 ? (
+            <List disablePadding>
+              {athleteInfo.achievements.map((achievement, index) => (
+                <ListItem key={index}>
+                  <ListItemIcon><EmojiEvents /></ListItemIcon>
+                  <ListItemText primary={achievement} />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography color="text.secondary">No achievements added yet</Typography>
+          )}
+        </Grid>
+      </Grid>
     );
   };
 
@@ -1399,6 +1286,351 @@ const Profile: React.FC = () => {
     });
   };
 
+  const renderEducationSection = () => {
+    if (!profileData || profileData.userType !== 'athlete' || !profileData.athleteInfo?.academicInfo) return null;
+
+    const { athleteInfo } = profileData;
+    const { academicInfo } = athleteInfo;
+
+    return (
+      <Paper sx={{ p: 3, mb: 2 }}>
+        <Typography variant="h6" gutterBottom>Education</Typography>
+        {isEditing ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              fullWidth
+              label="School"
+              value={academicInfo.currentSchool || ''}
+              onChange={(e) => handleAthleteInfoChange('academicInfo', {
+                ...academicInfo,
+                currentSchool: e.target.value
+              })}
+            />
+            <TextField
+              fullWidth
+              label="Graduation Year"
+              type="number"
+              value={academicInfo.graduationYear || ''}
+              onChange={(e) => handleAthleteInfoChange('academicInfo', {
+                ...academicInfo,
+                graduationYear: e.target.value
+              })}
+            />
+          </Box>
+        ) : (
+          <List>
+            <ListItem>
+              <ListItemIcon><School /></ListItemIcon>
+              <ListItemText
+                primary={academicInfo.currentSchool || 'Add your school'}
+                secondary={`Class of ${academicInfo.graduationYear || 'Not specified'}`}
+              />
+            </ListItem>
+          </List>
+        )}
+      </Paper>
+    );
+  };
+
+  const renderSocialLinks = (): JSX.Element => {
+    if (!profileData?.socialLinks) return <></>;
+
+    return (
+      <>
+        {Object.entries(profileData.socialLinks).map(([platform, url]) => (
+          <ListItem key={platform}>
+            <ListItemAvatar>
+              <IconButton 
+                onClick={() => handleSocialLinkClick(platform)}
+                sx={{ 
+                  '&:hover': { 
+                    transform: 'scale(1.1)',
+                    transition: 'transform 0.2s'
+                  } 
+                }}
+                disabled={loading}
+              >
+                <Avatar sx={{ 
+                  bgcolor: url ? 'success.main' : 'primary.main',
+                  opacity: loading ? 0.7 : 1
+                }}>
+                  {loading ? (
+                    <CircularProgress size={24} color="inherit" />
+                  ) : (
+                    <>
+                      {platform === 'instagram' && <InstagramIcon />}
+                      {platform === 'twitter' && <TwitterIcon />}
+                      {platform === 'linkedin' && <LinkedInIcon />}
+                    </>
+                  )}
+                </Avatar>
+              </IconButton>
+            </ListItemAvatar>
+            <ListItemText
+              primary={
+                <Box display="flex" alignItems="center">
+                  <Typography>
+                    {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                  </Typography>
+                  {url && (
+                    <Tooltip title="Account linked">
+                      <Check sx={{ ml: 1, color: 'success.main', fontSize: 16 }} />
+                    </Tooltip>
+                  )}
+                </Box>
+              }
+              secondary={
+                <Typography variant="body2" color="textSecondary">
+                  {url ? (
+                    <Link href={url} target="_blank" rel="noopener noreferrer">
+                      View Profile
+                    </Link>
+                  ) : (
+                    'Click icon to link account'
+                  )}
+                </Typography>
+              }
+            />
+          </ListItem>
+        ))}
+      </>
+    );
+  };
+
+  const renderVerificationStatus = () => {
+    if (!profileData) return null;
+
+    const isPending = profileData.verificationStatus === 'pending';
+    const isApproved = profileData.verificationStatus === 'approved';
+    const isRejected = profileData.verificationStatus === 'rejected';
+    const isNone = !profileData.verificationStatus || profileData.verificationStatus === 'none';
+
+    return (
+      <Box sx={{ width: '100%' }}>
+        <Paper sx={{ p: 3 }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Box display="flex" alignItems="center">
+              <Verified 
+                color={isApproved ? "primary" : "action"} 
+                sx={{ mr: 1 }} 
+              />
+              <Box>
+                <Typography variant="h6">Verification Status</Typography>
+                <Typography variant="body2" color="textSecondary">
+                  {isPending && "Your verification request is being reviewed"}
+                  {isApproved && "Your profile is verified"}
+                  {isRejected && "Your verification request was rejected"}
+                  {isNone && "Request verification to get a blue checkmark"}
+                </Typography>
+              </Box>
+            </Box>
+            {!isApproved && user?.uid === profileData.uid && !isPending && (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<Verified />}
+                onClick={handleVerificationRequest}
+              >
+                Request Verification
+              </Button>
+            )}
+          </Box>
+        </Paper>
+      </Box>
+    );
+  };
+
+  const renderTeamFields = () => {
+    if (!profileData?.teamInfo) return null;
+
+    const teamInfo = profileData.teamInfo;
+    const fields = [
+      { key: 'teamName', label: 'Team Name', icon: <Group /> },
+      { key: 'sport', label: 'Sport', icon: <Business /> },
+      { key: 'achievements', label: 'Achievements', icon: <EmojiEvents /> },
+      { key: 'openPositions', label: 'Open Positions', icon: <Group /> }
+    ] as const;
+
+    return (
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Team Information
+        </Typography>
+        <List>
+          {fields.map(({ key, label, icon }) => (
+            <ListItem key={key}>
+              <ListItemIcon>
+                {icon}
+              </ListItemIcon>
+              <ListItemText
+                primary={label}
+                secondary={
+                  Array.isArray(teamInfo[key])
+                    ? (teamInfo[key] as string[]).join(', ') || 'None'
+                    : teamInfo[key] || 'Not specified'
+                }
+              />
+            </ListItem>
+          ))}
+        </List>
+      </Box>
+    );
+  };
+
+  const renderTeamContent = () => {
+    if (!profileData) return null;
+
+    switch (profileData.userType) {
+      case 'athlete':
+        return (
+          <Box sx={{ width: '100%' }}>
+            {renderAthleteFields()}
+          </Box>
+        );
+      case 'coach':
+        return (
+          <Box sx={{ width: '100%' }}>
+            {renderCoachFields()}
+          </Box>
+        );
+      case 'team':
+        return (
+          <Box sx={{ width: '100%' }}>
+            {renderTeamFields()}
+          </Box>
+        );
+      case 'sponsor':
+        return (
+          <Box sx={{ width: '100%' }}>
+            {/* Sponsor-specific content */}
+            <Typography>Sponsor information coming soon</Typography>
+          </Box>
+        );
+      case 'media':
+        return (
+          <Box sx={{ width: '100%' }}>
+            {/* Media-specific content */}
+            <Typography>Media information coming soon</Typography>
+          </Box>
+        );
+      case 'college':
+        return (
+          <Box sx={{ width: '100%' }}>
+            {/* College-specific content */}
+            <Typography>College information coming soon</Typography>
+          </Box>
+        );
+      default:
+        return (
+          <Box sx={{ width: '100%' }}>
+            <Typography>No additional information available</Typography>
+          </Box>
+        );
+    }
+  };
+
+  console.log('Rendering profile with data:', profileData);
+
+  // Don't show connect/follow buttons if viewing own profile
+  const isOwnProfile = user?.uid === profileData.uid;
+
+  const renderPostDialog = () => (
+    <Dialog
+      open={openPostDialog}
+      onClose={handlePostDialogClose}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle>Create Post</DialogTitle>
+      <DialogContent>
+        <Box sx={{ mt: 2 }}>
+          <TextField
+            autoFocus
+            multiline
+            rows={4}
+            fullWidth
+            placeholder="What's on your mind?"
+            value={newPostContent}
+            onChange={(e) => setNewPostContent(e.target.value)}
+            disabled={isPostingLoading}
+          />
+          
+          {/* Media Previews */}
+          {postMediaPreviews.length > 0 && (
+            <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {postMediaPreviews.map((preview, index) => (
+                <Box
+                  key={index}
+                  sx={{
+                    position: 'relative',
+                    width: 100,
+                    height: 100,
+                  }}
+                >
+                  <img
+                    src={preview}
+                    alt={`Preview ${index + 1}`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      borderRadius: 4
+                    }}
+                  />
+                  <IconButton
+                    size="small"
+                    sx={{
+                      position: 'absolute',
+                      top: -8,
+                      right: -8,
+                      bgcolor: 'background.paper',
+                      '&:hover': { bgcolor: 'background.paper' }
+                    }}
+                    onClick={() => handleRemoveMedia(index)}
+                  >
+                    <Close fontSize="small" />
+                  </IconButton>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+      </DialogContent>
+      <DialogActions sx={{ p: 2, gap: 1 }}>
+        <input
+          type="file"
+          multiple
+          accept="image/*,video/*"
+          style={{ display: 'none' }}
+          ref={postMediaInputRef}
+          onChange={handlePostMediaSelect}
+        />
+        <Button
+          startIcon={<Image />}
+          onClick={() => postMediaInputRef.current?.click()}
+          disabled={isPostingLoading}
+        >
+          Add Media
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={handlePostDialogClose} disabled={isPostingLoading}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleCreatePost}
+          disabled={!newPostContent.trim() || isPostingLoading}
+        >
+          {isPostingLoading ? (
+            <CircularProgress size={24} />
+          ) : (
+            'Post'
+          )}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
   return (
     <Box>
       <Header />
@@ -1410,86 +1642,107 @@ const Profile: React.FC = () => {
         ) : error ? (
           <Paper sx={{ p: 3, textAlign: 'center' }}>
             <Typography color="error" variant="h6">{error}</Typography>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/home')}
-              sx={{ mt: 2 }}
-            >
+            <Button variant="contained" onClick={() => navigate('/home')} sx={{ mt: 2 }}>
               Return to Home
             </Button>
           </Paper>
         ) : (
-          <>
-            {/* Profile Header */}
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Box>
-                  {renderProfilePictureUpload()}
-                </Box>
-                <Box sx={{ flex: 1 }}>
-                  <Box display="flex" alignItems="center">
-                    <Typography variant="h4">{profileData.displayName || 'Anonymous'}</Typography>
-                    {profileData.verificationStatus === 'approved' && (
-                      <Tooltip title="Verified Profile">
-                        <Verified color="primary" sx={{ ml: 1 }} />
-                      </Tooltip>
-                    )}
-                  </Box>
-                  <Typography color="textSecondary">{profileData.email}</Typography>
-                  <Box mt={1}>
-                    <Chip label={profileData.userType} color="primary" sx={{ mr: 1 }} />
-                    {profileData.athleteInfo?.sports[0].sport && (
-                      <Chip label={profileData.athleteInfo.sports[0].sport} sx={{ mr: 1 }} />
-                    )}
-                  </Box>
-                </Box>
-                <Box>
-                  <Button
-                    variant="contained"
-                    startIcon={<Share />}
-                    sx={{ mr: 1 }}
-                  >
-                    Share Profile
-                  </Button>
-                  <IconButton>
-                    <BookmarkBorder />
-                  </IconButton>
-                </Box>
-              </Box>
-            </Paper>
+          <Grid container spacing={3}>
+            {/* Main Content Column */}
+            <Grid item xs={12} md={8}>
+              {renderProfileHeader()}
+              {renderAboutSection()}
+              
+              {/* Athletic Information Section */}
+              <Paper sx={{ p: 3, mb: 2, borderRadius: 2, width: '100%' }}>
+                <Typography variant="h6" gutterBottom>
+                  {profileData?.userType.charAt(0).toUpperCase() + profileData?.userType.slice(1)} Information
+                </Typography>
+                {renderTeamContent()}
+              </Paper>
 
-            {/* Profile Tabs */}
-            <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <Tabs value={activeTab} onChange={handleTabChange}>
-                <Tab icon={<Description />} label="Overview" />
-                <Tab icon={<VideoLibrary />} label="Posts" />
-                <Tab icon={<CalendarMonth />} label="Events" />
-                <Tab icon={<Group />} label="Connections" />
-              </Tabs>
-            </Box>
-
-            {/* Tab Panels */}
-            <TabPanel value={activeTab} index={0}>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                {renderOverviewTab()}
-              </Box>
-            </TabPanel>
-            <TabPanel value={activeTab} index={1}>
-              <React.Suspense fallback={<CircularProgress />}>
+              {/* Posts Section */}
+              <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="h6">Posts</Typography>
+                  {isOwnProfile && (
+                    <Button
+                      variant="contained"
+                      startIcon={<Add />}
+                      onClick={() => setOpenPostDialog(true)}
+                    >
+                      Create Post
+                    </Button>
+                  )}
+                </Box>
                 <PostsTab {...postsTabProps} />
-              </React.Suspense>
-            </TabPanel>
-            <TabPanel value={activeTab} index={2}>
-              {renderEventsTab()}
-            </TabPanel>
-            <TabPanel value={activeTab} index={3}>
-              {renderConnectionsTab()}
-            </TabPanel>
+              </Paper>
+            </Grid>
 
-            {/* Role-Specific Content */}
-            {renderRoleSpecificContent()}
-          </>
+            {/* Right Sidebar */}
+            <Grid item xs={12} md={4}>
+              {/* Profile Strength */}
+              <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
+                <Typography variant="h6" gutterBottom>Profile Strength</Typography>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={70} 
+                  sx={{ height: 8, borderRadius: 4 }} 
+                />
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Complete your profile to increase visibility
+                </Typography>
+              </Paper>
+
+              {/* Social Links */}
+              <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
+                <Typography variant="h6" gutterBottom>Social Links</Typography>
+                {renderSocialLinks()}
+              </Paper>
+
+              {/* Verification Status */}
+              {renderVerificationStatus()}
+
+              {/* Privacy Settings */}
+              {isOwnProfile && (
+                <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
+                  <Typography variant="h6" gutterBottom>Profile Privacy</Typography>
+                  <List>
+                    <ListItem>
+                      <ListItemIcon>
+                        <Public />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary="Profile Visibility"
+                        secondary={profileData?.privacySettings?.profileVisibility || 'Public'}
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton>
+                          <EditIcon />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <Message />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary="Message Settings"
+                        secondary={profileData?.privacySettings?.allowMessagesFrom || 'Everyone'}
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton>
+                          <EditIcon />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                  </List>
+                </Paper>
+              )}
+            </Grid>
+          </Grid>
         )}
+        {renderPostDialog()}
       </Container>
     </Box>
   );

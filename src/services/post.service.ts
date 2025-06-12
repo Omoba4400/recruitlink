@@ -29,38 +29,56 @@ import { User } from '../types/user';
 const POSTS_COLLECTION = 'posts';
 const POSTS_PER_PAGE = 10;
 
-const uploadToCloudinary = async (file: File): Promise<MediaItem> => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('upload_preset', process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET!);
+export const uploadToCloudinary = async (file: File): Promise<MediaItem> => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET!);
 
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/auto/upload`,
-    {
-      method: 'POST',
-      body: formData,
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/auto/upload`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to upload media to Cloudinary');
     }
-  );
 
-  if (!response.ok) {
-    throw new Error('Failed to upload media to Cloudinary');
+    const data = await response.json();
+    
+    // Validate required fields
+    if (!data.public_id || !data.secure_url) {
+      throw new Error('Invalid response from Cloudinary: missing required fields');
+    }
+
+    const mediaItem: MediaItem = {
+      id: data.public_id,
+      type: data.resource_type === 'image' ? 'image' : 'video',
+      url: data.secure_url,
+      path: data.public_id,
+      filename: file.name
+    };
+
+    // Validate the media item
+    if (!mediaItem.url || !mediaItem.id) {
+      throw new Error('Failed to create valid media item');
+    }
+
+    return mediaItem;
+  } catch (error) {
+    console.error('Error in uploadToCloudinary:', error);
+    throw error;
   }
-
-  const data = await response.json();
-  return {
-    id: data.public_id,
-    type: data.resource_type === 'image' ? 'image' : 'video',
-    url: data.secure_url,
-    path: data.public_id,
-    filename: file.name
-  };
 };
 
 export const createPost = async (
   userId: string,
   data: {
     content: string;
-    media?: string[];
+    media?: MediaItem[];
     visibility?: 'public' | 'followers' | 'connections' | 'private';
   }
 ): Promise<string> => {
@@ -70,11 +88,12 @@ export const createPost = async (
       content: data.content,
       media: data.media || [],
       visibility: data.visibility || 'public',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      likes: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      reactions: [],
       comments: [],
-      shares: 0
+      shares: 0,
+      isEdited: false
     };
     
     const docRef = await addDoc(collection(db, 'posts'), postData);
@@ -482,6 +501,7 @@ export const getUserPosts = async (
   hasMore: boolean;
 }> => {
   try {
+    console.log('getUserPosts called with userId:', userId);
     const postsRef = collection(db, POSTS_COLLECTION);
     let q = query(
       postsRef,
@@ -491,6 +511,7 @@ export const getUserPosts = async (
     );
 
     if (lastVisible) {
+      console.log('Using pagination with lastVisible document');
       q = query(
         postsRef,
         where('authorId', '==', userId),
@@ -500,16 +521,23 @@ export const getUserPosts = async (
       );
     }
 
+    console.log('Executing Firestore query...');
     const querySnapshot = await getDocs(q);
+    console.log('Query results:', querySnapshot.docs.length, 'documents found');
+    
     const posts: PostWithAuthor[] = [];
     
+    console.log('Fetching author profile...');
     const author = await getUserProfile(userId);
     if (!author) {
+      console.error('Author profile not found for userId:', userId);
       throw new Error('Author not found');
     }
+    console.log('Author profile found:', author.displayName);
 
     for (const doc of querySnapshot.docs) {
       const postData = doc.data() as Post;
+      console.log('Processing post:', doc.id, postData);
       posts.push({
         ...postData,
         id: doc.id,
@@ -517,11 +545,13 @@ export const getUserPosts = async (
       });
     }
 
-    return {
+    const result = {
       posts,
       lastVisible: querySnapshot.docs[querySnapshot.docs.length - 1] || null,
       hasMore: querySnapshot.docs.length === POSTS_PER_PAGE
     };
+    console.log('Returning result:', result);
+    return result;
   } catch (error) {
     console.error('Error getting user posts:', error);
     throw error;

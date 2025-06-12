@@ -76,6 +76,8 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow update: if isAuthenticated() && (
         request.auth.uid == userId ||
+        // Allow admins to update verification status
+        (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verificationStatus', 'verified', 'updatedAt'])) ||
         // Allow connection updates from either user
         (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['connections', 'updatedAt']) &&
@@ -198,7 +200,11 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid || isAdmin()
       );
       allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
-      allow update: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        resource.data.userId == request.auth.uid && 
+        request.resource.data.status == resource.data.status
+      );
       allow delete: if isAuthenticated() && (
         resource.data.userId == request.auth.uid || isAdmin()
       );
@@ -244,13 +250,17 @@ service cloud.firestore {
         // Allow creating notifications for users you interact with
         request.resource.data.userId != request.auth.uid && (
           // Connection requests
-          (request.resource.data.type == 'connection_request' && exists(/databases/$(database)/documents/users/$(request.resource.data.userId))) ||
+          (request.resource.data.type == 'connection_request' && 
+            exists(/databases/$(database)/documents/users/$(request.resource.data.userId))) ||
           // Post interactions
-          (request.resource.data.type in ['post_like', 'post_comment'] && exists(/databases/$(database)/documents/posts/$(request.resource.data.postId))) ||
+          (request.resource.data.type in ['post_like', 'post_comment'] && 
+            exists(/databases/$(database)/documents/posts/$(request.resource.data.postId))) ||
           // Messages
-          (request.resource.data.type == 'new_message' && exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId))) ||
+          (request.resource.data.type == 'new_message' && 
+            exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId))) ||
           // Follows
-          (request.resource.data.type == 'new_follower' && exists(/databases/$(database)/documents/users/$(request.resource.data.userId)))
+          (request.resource.data.type == 'new_follower' && 
+            exists(/databases/$(database)/documents/users/$(request.resource.data.userId)))
         )
       );
       allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;

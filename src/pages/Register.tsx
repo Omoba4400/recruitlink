@@ -19,6 +19,7 @@ import {
   useTheme,
   useMediaQuery,
   Grid,
+  CircularProgress,
 } from '@mui/material';
 import { Home as HomeIcon } from '@mui/icons-material';
 import { registerUser } from '../services/auth.service';
@@ -26,12 +27,17 @@ import { createUserProfile } from '../services/user.service';
 import { setUser, setError } from '../store/slices/authSlice';
 import { User, UserType, UserProfile } from '../types/user';
 import { useSnackbar } from 'notistack';
+import { auth } from '../config/firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 interface FormData {
   email: string;
   password: string;
   confirmPassword: string;
   displayName: string;
+  phoneNumber: string;
   userType: UserType;
   athleteInfo?: {
     sports: [{
@@ -96,6 +102,7 @@ const initialFormData: FormData = {
   password: '',
   confirmPassword: '',
   displayName: '',
+  phoneNumber: '',
   userType: 'athlete',
   athleteInfo: {
     sports: [{
@@ -140,6 +147,8 @@ const formatUserData = (firebaseUser: any): User => {
     verified: false,
     blocked: false,
     emailVerified: firebaseUser.emailVerified,
+    phoneNumber: '',
+    phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
     privacySettings: {
@@ -572,7 +581,7 @@ const Register: React.FC = () => {
       });
 
       dispatch(setUser(userData));
-      enqueueSnackbar('Registration successful! Please verify your email.', { variant: 'success' });
+      enqueueSnackbar('Please verify your email.', { variant: 'success' });
       setVerificationSent(true);
       navigate('/verify-email');
     } catch (error: any) {
@@ -726,6 +735,19 @@ const Register: React.FC = () => {
               autoComplete="name"
               value={formData.displayName}
               onChange={handleTextChange}
+              {...inputProps}
+            />
+            <TextField
+              required
+              fullWidth
+              id="phoneNumber"
+              label="Phone Number"
+              name="phoneNumber"
+              autoComplete="tel"
+              value={formData.phoneNumber}
+              onChange={handleTextChange}
+              placeholder="+1234567890"
+              helperText="Enter phone number with country code (e.g., +1234567890)"
               {...inputProps}
             />
             <FormControl 

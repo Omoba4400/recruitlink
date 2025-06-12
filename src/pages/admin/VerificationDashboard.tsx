@@ -28,7 +28,7 @@ import {
   Visibility as ViewIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
-import { collection, query, where, getDocs, doc, updateDoc, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, orderBy, Timestamp, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../../config/firebase';
 import { UserProfile } from '../../types/user';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
@@ -220,16 +220,15 @@ const VerificationDashboard: React.FC = () => {
 
   const handleApprove = async (request: VerificationRequest) => {
     try {
-      setProcessingAction(true);
-      // Update user verification status
-      const userRef = doc(db, 'users', request.uid);
-      await updateDoc(userRef, {
-        verified: true,
-        verificationStatus: 'approved',
-        updatedAt: new Date().toISOString(),
-      });
+      if (!isAdmin || !auth.currentUser) {
+        throw new Error('Unauthorized: Admin access required');
+      }
 
-      // Update verification request status
+      setProcessingAction(true);
+      console.log('Starting approval process for:', request.uid);
+
+      // First update the verification request status
+      console.log('Updating verification request...');
       const verificationQuery = query(
         collection(db, 'verifications'),
         where('userId', '==', request.uid),
@@ -237,20 +236,44 @@ const VerificationDashboard: React.FC = () => {
       );
       const verificationDocs = await getDocs(verificationQuery);
       
-      if (!verificationDocs.empty) {
-        await updateDoc(doc(db, 'verifications', verificationDocs.docs[0].id), {
-          status: 'approved',
-          updatedAt: new Date().toISOString(),
-          reviewedBy: auth.currentUser?.uid
-        });
+      if (verificationDocs.empty) {
+        throw new Error('No pending verification request found');
       }
+
+      const verificationDoc = verificationDocs.docs[0];
+      const verificationRef = doc(db, 'verifications', verificationDoc.id);
+      
+      // Batch write to ensure both updates succeed or fail together
+      const batch = writeBatch(db);
+
+      // Update verification document
+      batch.update(verificationRef, {
+        status: 'approved',
+        updatedAt: new Date().toISOString(),
+        reviewedBy: auth.currentUser.uid,
+        reviewedAt: new Date().toISOString()
+      });
+
+      // Update user document
+      const userRef = doc(db, 'users', request.uid);
+      batch.update(userRef, {
+        verified: true,
+        verificationStatus: 'approved',
+        updatedAt: new Date().toISOString()
+      });
+
+      // Commit both updates
+      console.log('Committing batch updates...');
+      await batch.commit();
+      console.log('Updates committed successfully');
 
       // Update local state
       setRequests(prev => prev.filter(r => r.uid !== request.uid));
       enqueueSnackbar('Verification request approved successfully', { variant: 'success' });
     } catch (error) {
       console.error('Error approving verification:', error);
-      enqueueSnackbar('Failed to approve verification request', { variant: 'error' });
+      const errorMessage = error instanceof Error ? error.message : 'Failed to approve verification request';
+      enqueueSnackbar(errorMessage, { variant: 'error' });
     } finally {
       setProcessingAction(false);
       setViewDialogOpen(false);

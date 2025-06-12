@@ -69,7 +69,8 @@ const formatUserData = async (firebaseUser: typeof auth.currentUser): Promise<Us
     },
     followers: userData?.followers || [],
     following: userData?.following || [],
-    connections: userData?.connections || []
+    connections: userData?.connections || [],
+    phoneVerified: userData?.phoneVerified || false
   };
 };
 
@@ -91,11 +92,19 @@ const VerificationPending: React.FC = () => {
         return;
       }
 
-      // If user is already verified, redirect immediately
+      // If user is already verified, redirect to appropriate page
       if (auth.currentUser.emailVerified) {
         const userData = await formatUserData(auth.currentUser);
         dispatch(setUser(userData));
         dispatch(updateEmailVerification(true));
+        
+        // If phone is not verified, redirect to phone verification
+        if (!userData.phoneVerified) {
+          navigate('/verify-phone');
+          return;
+        }
+        
+        // If both email and phone are verified, redirect to home
         const redirectPath = getRoleBasedRedirectPath(userData.userType);
         navigate(redirectPath);
         return;
@@ -122,6 +131,13 @@ const VerificationPending: React.FC = () => {
           enqueueSnackbar('Email verified successfully!', { variant: 'success' });
           clearInterval(interval);
           
+          // If phone is not verified, redirect to phone verification
+          if (!userData.phoneVerified) {
+            navigate('/verify-phone');
+            return;
+          }
+          
+          // If both email and phone are verified, redirect to home
           const redirectPath = getRoleBasedRedirectPath(userData.userType);
           navigate(redirectPath);
         }
@@ -168,6 +184,13 @@ const VerificationPending: React.FC = () => {
         dispatch(updateEmailVerification(true));
         enqueueSnackbar('Email verified successfully!', { variant: 'success' });
         
+        // If phone is not verified, redirect to phone verification
+        if (!userData.phoneVerified) {
+          navigate('/verify-phone');
+          return;
+        }
+        
+        // If both email and phone are verified, redirect to home
         const redirectPath = getRoleBasedRedirectPath(userData.userType);
         navigate(redirectPath);
       } else {

@@ -3,7 +3,48 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase configuration. Please check your environment variables.');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true
+  }
+});
+
+// Custom function to invoke Edge Functions
+export const invokeFunctionWithRetry = async (functionName: string, body: any, retries = 3) => {
+  let attempt = 0;
+  
+  while (attempt < retries) {
+    try {
+      const { data, error } = await supabase.functions.invoke(functionName, {
+        body,
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (error) throw error;
+      return { data, error: null };
+    } catch (error: any) {
+      attempt++;
+      console.error(`Function invocation error (attempt ${attempt}/${retries}):`, error);
+      
+      if (attempt === retries) {
+        return { data: null, error };
+      }
+      
+      // Wait before retrying (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+    }
+  }
+  
+  return { data: null, error: new Error('Max retries exceeded') };
+};
 
 // Types for messages
 export interface Message {

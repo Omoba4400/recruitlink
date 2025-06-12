@@ -75,8 +75,8 @@ import Header from '../components/layout/Header';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '@mui/material/styles';
 import { useMediaQuery } from '@mui/material';
-import { getFeed, addReaction, removeReaction, addComment, sharePost, createPost, updatePost, deletePost } from '../services/post.service';
-import type { PostWithAuthor, Comment as PostComment, Reaction, ReactionType } from '../types/post';
+import { getFeed, addReaction, removeReaction, addComment, sharePost, createPost, updatePost, deletePost, uploadToCloudinary } from '../services/post.service';
+import type { PostWithAuthor, Comment as PostComment, Reaction, ReactionType, MediaItem } from '../types/post';
 import { useSnackbar } from 'notistack';
 import { Timestamp, DocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { getUserProfile } from '../services/user.service';
@@ -86,165 +86,7 @@ import { v4 as uuidv4 } from 'uuid';
 import DeleteDialog from '../components/DeleteDialog';
 import { emitPostDeleted } from '../events/postEvents';
 
-// Post Types
-interface Post {
-  id: string;
-  type: 'text' | 'media' | 'match' | 'event' | 'sponsor' | 'achievement' | 'performance' | 'application';
-  content: string;
-  author: {
-    name: string;
-    avatar: string;
-    role: string;
-  };
-  timestamp: string;
-  likes: number;
-  comments: number;
-  shares: number;
-  media?: string;
-  metrics?: {
-    value: number;
-    label: string;
-    change?: number;
-  };
-}
-
-// Role-specific feed data
-const roleBasedPosts: Record<string, Post[]> = {
-  athlete: [
-    {
-      id: 'a1',
-      type: 'performance',
-      content: 'Weekly Performance Update',
-      author: {
-        name: 'Performance Tracker',
-        avatar: '📊',
-        role: 'System',
-      },
-      timestamp: '1 hour ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-      metrics: {
-        value: 85,
-        label: 'Training Score',
-        change: 5,
-      },
-    },
-    {
-      id: 'a2',
-      type: 'event',
-      content: 'You\'ve been invited to Summer Training Camp!',
-      author: {
-        name: 'Team Thunder',
-        avatar: 'T',
-        role: 'Team',
-      },
-      timestamp: '2 hours ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-    },
-  ],
-  coach: [
-    {
-      id: 'c1',
-      type: 'application',
-      content: 'New athlete application received',
-      author: {
-        name: 'John Smith',
-        avatar: 'J',
-        role: 'Athlete',
-      },
-      timestamp: '1 hour ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-      metrics: {
-        value: 92,
-        label: 'Skill Rating',
-      },
-    },
-    {
-      id: 'c2',
-      type: 'performance',
-      content: 'Top Performers This Week',
-      author: {
-        name: 'Performance Analytics',
-        avatar: '📈',
-        role: 'System',
-      },
-      timestamp: '3 hours ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-    },
-  ],
-  team: [
-    {
-      id: 't1',
-      type: 'application',
-      content: 'New team application received',
-      author: {
-        name: 'Mike Johnson',
-        avatar: 'M',
-        role: 'Athlete',
-      },
-      timestamp: '1 hour ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-    },
-    {
-      id: 't2',
-      type: 'sponsor',
-      content: 'New sponsorship opportunity available',
-      author: {
-        name: 'Nike Sports',
-        avatar: 'N',
-        role: 'Company',
-      },
-      timestamp: '4 hours ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-    },
-  ],
-  sponsor: [
-    {
-      id: 'co1',
-      type: 'performance',
-      content: 'Sponsorship ROI Report',
-      author: {
-        name: 'Analytics Dashboard',
-        avatar: '📊',
-        role: 'System',
-      },
-      timestamp: '1 hour ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-      metrics: {
-        value: 156,
-        label: 'Engagement Rate',
-        change: 12,
-      },
-    },
-    {
-      id: 'co2',
-      type: 'application',
-      content: 'New sponsorship request',
-      author: {
-        name: 'Team Thunder',
-        avatar: 'T',
-        role: 'Team',
-      },
-      timestamp: '2 hours ago',
-      likes: 0,
-      comments: 0,
-      shares: 0,
-    },
-  ],
-};
+// Main Feed Component
 
 // Add mock users data
 const mockUsers = {
@@ -440,6 +282,7 @@ const LeftSidebar = () => {
 // Main Feed Component
 const MainFeed = () => {
   const user = useSelector((state: RootState) => state.auth.user);
+  const navigate = useNavigate();
   const [postContent, setPostContent] = useState('');
   const [isPosting, setIsPosting] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<File[]>([]);
@@ -515,42 +358,69 @@ const MainFeed = () => {
         </Typography>
         {mediaItems.length > 0 && (
           <Box sx={{ mt: 2, mb: 2 }}>
-            {mediaItems.map((mediaItem, index) => (
-              <Box
-                key={mediaItem.id}
-                sx={{
-                  width: '100%',
-                  mb: index < mediaItems.length - 1 ? 2 : 0
-                }}
-              >
-                {mediaItem.type === 'video' ? (
-                  <video
-                    controls
-                    style={{
-                      width: '100%',
-                      maxHeight: '500px',
-                      borderRadius: 8,
-                      backgroundColor: '#000'
-                    }}
-                  >
-                    <source src={mediaItem.url} type="video/mp4" />
-                    Your browser does not support the video tag.
-                  </video>
-                ) : (
-                  <img
-                    src={mediaItem.url}
-                    alt={mediaItem.filename || `Post media ${index + 1}`}
-                    style={{
-                      width: '100%',
-                      maxHeight: '500px',
-                      objectFit: 'contain',
-                      borderRadius: 8
-                    }}
-                    loading="lazy"
-                  />
-                )}
-              </Box>
-            ))}
+            {mediaItems.map((mediaItem, index) => {
+              // Extract filename from URL if filename is not available, with null checks
+              const displayName = mediaItem.filename || 
+                (mediaItem.url ? mediaItem.url.split('/').pop()?.split('.')[0] : null) || 
+                `Media ${index + 1}`;
+              
+              // Skip rendering if no URL is available
+              if (!mediaItem.url) {
+                console.error('Media item is missing URL:', mediaItem);
+                return null;
+              }
+
+              return (
+                <Box
+                  key={mediaItem.id}
+                  sx={{
+                    width: '100%',
+                    mb: index < mediaItems.length - 1 ? 2 : 0,
+                    display: 'flex',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {mediaItem.type === 'video' ? (
+                    <video
+                      controls
+                      style={{
+                        width: '100%',
+                        maxHeight: '500px',
+                        borderRadius: 8,
+                        backgroundColor: '#000'
+                      }}
+                    >
+                      <source src={mediaItem.url} type="video/mp4" />
+                      Your browser does not support the video tag.
+                    </video>
+                  ) : (
+                    <Box sx={{ position: 'relative', width: '100%', textAlign: 'center' }}>
+                      <img
+                        src={mediaItem.url}
+                        alt={displayName}
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '500px',
+                          objectFit: 'contain',
+                          borderRadius: 8
+                        }}
+                        loading="lazy"
+                      />
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          display: 'block',
+                          mt: 1,
+                          color: 'text.secondary'
+                        }}
+                      >
+                        {displayName}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              );
+            })}
           </Box>
         )}
       </>
@@ -679,36 +549,30 @@ const MainFeed = () => {
       setIsPosting(true);
       
       // Upload media files first if any
-      const mediaUrls: string[] = [];
+      const mediaItems: MediaItem[] = [];
       if (selectedMedia.length > 0) {
         for (const file of selectedMedia) {
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('upload_preset', process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET!);
+          // Clean up the filename to be more user-friendly
+          const cleanFileName = file.name
+            .replace(/\.[^/.]+$/, '') // Remove file extension
+            .replace(/[_-]/g, ' ') // Replace underscores and hyphens with spaces
+            .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize first letter of each word
 
-          const response = await fetch(
-            `https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/auto/upload`,
-            {
-              method: 'POST',
-              body: formData,
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error('Failed to upload media');
-          }
-
-          const data = await response.json();
-          mediaUrls.push(data.secure_url);
+          const mediaItem = await uploadToCloudinary(file);
+          // Ensure we use our cleaned filename
+          mediaItems.push({
+            ...mediaItem,
+            filename: cleanFileName
+          });
         }
       }
 
-      // Create the post with media URLs
+      // Create the post with media items
       await createPost(
         user.uid,
         {
           content: postContent,
-          media: mediaUrls,
+          media: mediaItems,
           visibility: 'public'
         }
       );
@@ -1058,41 +922,64 @@ const MainFeed = () => {
                   }
                 }}
               >
-                <Avatar 
-                  src={post.author.photoURL} 
-                  alt={post.author.displayName}
-                  sx={{ bgcolor: 'primary.main' }}
+                <Box
+                  component="button"
+                  onClick={() => navigate(`/view-profile/${post.author.uid}`)}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    '&:hover': {
+                      opacity: 0.8
+                    }
+                  }}
                 >
-                  {post.author.displayName?.[0]?.toUpperCase()}
-                </Avatar>
-                <Box flex={1}>
-                  <Box display="flex" alignItems="center">
-                    <Typography 
-                      variant="subtitle1"
-                      sx={{ fontSize: { xs: '1.1rem', sm: '1rem' } }}
-                    >
-                      {post.author.displayName}
-                    </Typography>
-                    {post.author.verified && (
-                      <Tooltip title="Verified Profile">
-                        <Verified 
-                          color="primary" 
-                          sx={{ 
-                            ml: 0.5, 
-                            fontSize: { xs: '1.25rem', sm: '1rem' } 
-                          }} 
-                        />
-                      </Tooltip>
-                    )}
-                  </Box>
-                  <Typography 
-                    variant="body2" 
-                    color="text.secondary"
-                    sx={{ fontSize: { xs: '1rem', sm: '0.875rem' } }}
+                  <Avatar 
+                    src={post.author.photoURL} 
+                    alt={post.author.displayName}
+                    sx={{ bgcolor: 'primary.main' }}
                   >
-                    {new Date(post.createdAt.toDate()).toLocaleString()} • {post.author.userType}
-                    {post.isEdited && ' • Edited'}
-                  </Typography>
+                    {post.author.displayName?.[0]?.toUpperCase()}
+                  </Avatar>
+                  <Box>
+                    <Box display="flex" alignItems="center">
+                      <Typography 
+                        variant="subtitle1"
+                        sx={{ 
+                          fontSize: { xs: '1.1rem', sm: '1rem' },
+                          color: 'text.primary'
+                        }}
+                      >
+                        {post.author.displayName}
+                      </Typography>
+                      {post.author.verified && (
+                        <Tooltip title="Verified Profile">
+                          <Verified 
+                            color="primary" 
+                            sx={{ 
+                              ml: 0.5, 
+                              fontSize: { xs: '1.25rem', sm: '1rem' } 
+                            }} 
+                          />
+                        </Tooltip>
+                      )}
+                    </Box>
+                    <Typography 
+                      variant="body2" 
+                      color="text.secondary"
+                      sx={{ fontSize: { xs: '1rem', sm: '0.875rem' } }}
+                    >
+                      {typeof post.createdAt === 'string' 
+                        ? new Date(post.createdAt).toLocaleString()
+                        : post.createdAt?.toDate 
+                          ? new Date(post.createdAt.toDate()).toLocaleString()
+                          : 'Unknown date'} • {post.author.userType}
+                      {post.isEdited && ' • Edited'}
+                    </Typography>
+                  </Box>
                 </Box>
                 {user && post.author.uid === user.uid && (
                   <Box component="span" sx={{ ml: 'auto' }}>
@@ -1225,7 +1112,11 @@ const MainFeed = () => {
                               {comment.content}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {new Date(comment.createdAt.toDate()).toLocaleString()}
+                              {typeof comment.createdAt === 'string'
+                                ? new Date(comment.createdAt).toLocaleString()
+                                : comment.createdAt?.toDate
+                                  ? new Date(comment.createdAt.toDate()).toLocaleString()
+                                  : 'Unknown date'}
                               {comment.isEdited && ' • Edited'}
                             </Typography>
                           </Box>

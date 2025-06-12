@@ -13,7 +13,8 @@ import {
   serverTimestamp,
   limit as firestoreLimit,
   addDoc,
-  orderBy
+  orderBy,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { User, UserProfile, ConnectionRequest } from '../types/user';
@@ -254,6 +255,11 @@ export const createUserProfileIfNotExists = async (user: User): Promise<UserProf
         blocked: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+        emailVerified: false,
+        phoneNumber: '',
+        phoneVerified: false,
+        isAdmin: false,
         verificationStatus: 'none',
         followers: [],
         following: [],
@@ -485,8 +491,27 @@ export const sendConnectionRequest = async (
   try {
     const timestamp = new Date().toISOString();
     
+    // First check if a request already exists
+    const existingRequestQuery = query(
+      collection(db, 'connectionRequests'),
+      where('senderId', '==', senderId),
+      where('receiverId', '==', receiverId),
+      where('status', '==', 'pending')
+    );
+    const existingRequests = await getDocs(existingRequestQuery);
+    if (!existingRequests.empty) {
+      console.log('Connection request already exists');
+      return;
+    }
+
+    // Get sender's profile for the notification
+    const senderProfile = await getUserProfile(senderId);
+    if (!senderProfile) {
+      throw new Error('Sender profile not found');
+    }
+
     // Create the connection request
-    await addDoc(collection(db, 'connectionRequests'), {
+    const requestDoc = await addDoc(collection(db, 'connectionRequests'), {
       senderId,
       receiverId,
       status: 'pending',
@@ -494,18 +519,24 @@ export const sendConnectionRequest = async (
       updatedAt: timestamp
     });
 
+    console.log('Created connection request:', requestDoc.id);
+
     // Create a notification for the receiver
-    await addDoc(collection(db, 'notifications'), {
+    const notificationDoc = await addDoc(collection(db, 'notifications'), {
       userId: receiverId,
+      senderId: senderId,
       type: 'connection_request',
       title: 'New Connection Request',
-      content: 'Someone wants to connect with you',
+      content: `${senderProfile.displayName || 'Someone'} wants to connect with you`,
       read: false,
-      createdAt: timestamp
+      createdAt: timestamp,
+      requestId: requestDoc.id
     });
+
+    console.log('Created notification:', notificationDoc.id);
   } catch (error) {
     console.error('Error sending connection request:', error);
-    throw error;
+    throw error; // Re-throw the error to handle it in the UI
   }
 };
 

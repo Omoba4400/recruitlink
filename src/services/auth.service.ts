@@ -6,13 +6,17 @@ import {
   AuthError,
   AuthErrorCodes,
   sendEmailVerification,
-  sendPasswordResetEmail,
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   User as FirebaseUser,
   UserCredential,
   deleteUser,
   reload,
   EmailAuthProvider,
-  reauthenticateWithCredential
+  reauthenticateWithCredential,
+  PhoneAuthProvider,
+  linkWithPhoneNumber,
+  updatePhoneNumber,
+  PhoneAuthCredential
 } from 'firebase/auth';
 import { 
   doc, 
@@ -117,6 +121,8 @@ const createUserDocument = async (
     verified: false,
     blocked: false,
     emailVerified: firebaseUser.emailVerified,
+    phoneNumber: firebaseUser.phoneNumber || '',
+    phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
     privacySettings: {
@@ -220,24 +226,24 @@ const createUserDocument = async (
   return userData;
 };
 
-const formatUserData = (userCredential: UserCredential, userType?: string): User => {
-  const { user: firebaseUser } = userCredential;
-  const timestamp = new Date().toISOString();
+const formatUserData = (firebaseUser: any): User => {
   return {
     id: firebaseUser.uid,
     uid: firebaseUser.uid,
     email: firebaseUser.email || '',
     displayName: firebaseUser.displayName || '',
     photoURL: firebaseUser.photoURL || undefined,
-    userType: (userType as User['userType']) || 'athlete',
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    lastLogin: timestamp,
+    userType: 'athlete',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
     bio: '',
     location: '',
     verified: false,
     blocked: false,
     emailVerified: firebaseUser.emailVerified,
+    phoneNumber: firebaseUser.phoneNumber || '',
+    phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
     privacySettings: {
@@ -252,7 +258,7 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
       instagram: '',
       twitter: '',
       linkedin: '',
-      youtube: '',
+      youtube: ''
     },
     followers: [],
     following: [],
@@ -297,6 +303,8 @@ export const registerUser = async (
       verified: false,
       blocked: false,
       emailVerified: user.emailVerified,
+      phoneNumber: user.phoneNumber || '',
+      phoneVerified: false,
       isAdmin: false,
       verificationStatus: 'none',
       privacySettings: {
@@ -380,12 +388,23 @@ export const resendVerificationEmail = async () => {
   }
 };
 
-export const sendPasswordReset = async (email: string) => {
+export const sendPasswordResetEmail = async (email: string): Promise<void> => {
   try {
-    await sendPasswordResetEmail(auth, email);
-  } catch (error) {
+    await firebaseSendPasswordResetEmail(auth, email);
+  } catch (error: any) {
     console.error('Error sending password reset email:', error);
-    throw error;
+    
+    // Handle specific Firebase auth errors
+    switch (error.code) {
+      case 'auth/invalid-email':
+        throw new Error('Invalid email address');
+      case 'auth/user-not-found':
+        throw new Error('No account found with this email address');
+      case 'auth/too-many-requests':
+        throw new Error('Too many attempts. Please try again later');
+      default:
+        throw new Error('Failed to send password reset email. Please try again');
+    }
   }
 };
 
@@ -636,9 +655,51 @@ export const deleteUserAccount = async (email: string, password: string): Promis
 
 export const resetPassword = async (email: string): Promise<void> => {
   try {
-    await sendPasswordResetEmail(auth, email);
+    await firebaseSendPasswordResetEmail(auth, email);
   } catch (error: any) {
     console.error('Password reset error:', error);
     throw new Error(error.message);
+  }
+};
+
+export const updateUserPhoneNumber = async (phoneNumber: string): Promise<void> => {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('No user is currently signed in');
+    }
+
+    // Update phone number in Firestore
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, {
+      phoneNumber,
+      phoneVerified: false,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error updating phone number:', error);
+    throw error;
+  }
+};
+
+export const verifyPhoneNumber = async (credential: PhoneAuthCredential): Promise<void> => {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('No user is currently signed in');
+    }
+
+    // Link the phone credential with the user
+    await updatePhoneNumber(user, credential);
+
+    // Update phone verification status in Firestore
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, {
+      phoneVerified: true,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error verifying phone number:', error);
+    throw error;
   }
 }; 
