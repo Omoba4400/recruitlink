@@ -50,12 +50,37 @@ const App: React.FC = () => {
     
     const updateOnlineStatus = async (status: boolean) => {
       try {
+<<<<<<< Updated upstream
+=======
+        // Check if user still exists and has permission to update status
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (!userDoc.exists()) {
+          console.log('User document no longer exists, skipping online status update');
+          return;
+        }
+
+        // Get privacy settings
+        const privacyDoc = await getDoc(doc(db, 'users', user.uid, 'settings', 'privacy'));
+        const privacySettings = privacyDoc.exists() ? privacyDoc.data() as PrivacySettings : null;
+        
+        // Only update online status if showOnlineStatus is enabled or undefined (default to true)
+        if (privacySettings?.showOnlineStatus !== false) {
+>>>>>>> Stashed changes
         await setDoc(userStatusRef, {
           online: status,
           lastSeen: serverTimestamp()
         }, { merge: true });
+<<<<<<< Updated upstream
       } catch (error) {
         console.error('Error updating online status:', error);
+=======
+        }
+      } catch (error) {
+        // Only log the error if it's not a permission error during account deletion
+        if (error instanceof Error && !error.toString().includes('permission')) {
+        console.error('Error updating online status:', error);
+        }
+>>>>>>> Stashed changes
       }
     };
 

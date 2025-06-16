@@ -428,7 +428,29 @@ export const reauthenticateUser = async (email: string, password: string): Promi
     await reauthenticateWithCredential(user, credential);
   } catch (error) {
     console.error('Error re-authenticating:', error);
+<<<<<<< Updated upstream
     throw error;
+=======
+    if (error.code === 'auth/wrong-password') {
+      throw new Error('Incorrect password. Please try again.');
+    } else if (error.code === 'auth/invalid-credential') {
+      throw new Error('Invalid credentials. Please check your password and try again.');
+    } else if (error.code === 'auth/too-many-requests') {
+      throw new Error('Too many attempts. Please try again later.');
+    } else if (error.code === 'auth/user-mismatch') {
+      throw new Error('The provided email does not match your account.');
+    } else if (error.code === 'auth/user-not-found') {
+      throw new Error('No account found with this email address.');
+    } else if (error.code === 'auth/requires-recent-login') {
+      throw new Error('For security reasons, please sign out and sign in again before deleting your account.');
+    }
+    // If it's our custom error from the email check above, pass it through
+    if (error.message && !error.code) {
+    throw error;
+    }
+    // For any other errors
+    throw new Error('Failed to verify your identity. Please try again.');
+>>>>>>> Stashed changes
   }
 };
 
@@ -440,11 +462,107 @@ export const deleteUserAccount = async (email: string, password: string): Promis
     }
 
     // First, re-authenticate the user
+<<<<<<< Updated upstream
     try {
       await reauthenticateUser(email, password);
     } catch (error: any) {
       if (error.code === 'auth/wrong-password') {
         throw new Error('Incorrect password. Please try again.');
+=======
+      await reauthenticateUser(email, password);
+
+    try {
+      // 1. Delete the user's own document first
+    const userRef = doc(db, 'users', user.uid);
+    const userDoc = await getDoc(userRef);
+    
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as User;
+    
+        // 2. Delete user's posts
+        const postsQuery = query(
+          collection(db, 'posts'),
+          where('authorId', '==', user.uid)
+    );
+        const postDocs = await getDocs(postsQuery);
+        const postDeletePromises = postDocs.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(postDeletePromises);
+
+        // 3. Delete user's messages
+    const messagesQuery = query(
+      collection(db, 'messages'),
+      where('senderId', '==', user.uid)
+    );
+    const messageDocs = await getDocs(messagesQuery);
+        const messageDeletePromises = messageDocs.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(messageDeletePromises);
+
+        // 4. Delete user's notifications
+    const notificationsQuery = query(
+      collection(db, 'notifications'),
+      where('userId', '==', user.uid)
+    );
+    const notificationDocs = await getDocs(notificationsQuery);
+        const notificationDeletePromises = notificationDocs.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(notificationDeletePromises);
+
+        // 5. Delete verification requests
+        const verificationQuery = query(
+          collection(db, 'verifications'),
+          where('userId', '==', user.uid)
+    );
+        const verificationDocs = await getDocs(verificationQuery);
+        const verificationDeletePromises = verificationDocs.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(verificationDeletePromises);
+
+        // 6. Update other users' references in batches
+        const batch = writeBatch(db);
+
+        // Remove from followers' following lists
+      if (userData.followers?.length) {
+        for (const followerId of userData.followers) {
+            const followerRef = doc(db, 'users', followerId);
+            batch.update(followerRef, {
+              following: arrayRemove(user.uid)
+            });
+        }
+      }
+
+        // Remove from following users' followers lists
+      if (userData.following?.length) {
+        for (const followingId of userData.following) {
+            const followingRef = doc(db, 'users', followingId);
+            batch.update(followingRef, {
+              followers: arrayRemove(user.uid)
+            });
+        }
+      }
+
+      // Remove from connections
+      if (userData.connections?.length) {
+        for (const connectionId of userData.connections) {
+            const connectionRef = doc(db, 'users', connectionId);
+            batch.update(connectionRef, {
+              connections: arrayRemove(user.uid)
+            });
+        }
+      }
+
+        // Commit the batch update
+        await batch.commit();
+
+        // 7. Delete the user document itself
+        await deleteDoc(userRef);
+
+        // 8. Finally, delete the Firebase Auth account
+        await deleteUser(user);
+
+        console.log('Account successfully deleted');
+      } else {
+        // If user document doesn't exist, just delete the auth account
+        await deleteUser(user);
+        console.log('Auth account deleted (no Firestore document found)');
+>>>>>>> Stashed changes
       }
       throw error;
     }
