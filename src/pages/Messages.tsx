@@ -17,6 +17,8 @@ import {
   CircularProgress,
   useTheme,
   styled,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -34,8 +36,11 @@ import { messageService, Message, Conversation } from '../services/messageServic
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import ChatWindow from '../components/chat/ChatWindow';
+import GroupChatWindow from '../components/chat/GroupChatWindow';
+import GroupManager from '../components/chat/GroupManager';
 import { User } from '../types/user';
 import { getUserProfile } from '../services/user.service';
+import { Group } from '../types/group';
 
 const ChatContainer = styled(Box)(({ theme }) => ({
   display: 'flex',
@@ -58,6 +63,24 @@ const ChatArea = styled(Paper)(({ theme }) => ({
   overflow: 'hidden',
 }));
 
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => {
+  return (
+    <Box
+      role="tabpanel"
+      hidden={value !== index}
+      sx={{ flex: 1, overflow: 'hidden', display: value === index ? 'flex' : 'none', flexDirection: 'column' }}
+    >
+      {value === index && children}
+    </Box>
+  );
+};
+
 const MessageBubble = styled(Box)<{ isOwn: boolean }>(({ theme, isOwn }) => ({
   maxWidth: '70%',
   padding: theme.spacing(1, 2),
@@ -72,17 +95,20 @@ const Messages: React.FC = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   const user = useSelector((state: RootState) => state.auth.user);
+  const profile = useSelector((state: RootState) => state.auth.profile);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
+  const [tabValue, setTabValue] = useState(0);
 
   const getOtherParticipantId = (conversation: Conversation) => {
     return conversation.participants.find(id => id !== user?.uid) || '';
   };
 
-  // Separate effect for fetching user profiles
+  // Effect for fetching user profiles
   useEffect(() => {
     const fetchUserProfiles = async (conversations: Conversation[]) => {
       for (const conversation of conversations) {
@@ -146,125 +172,119 @@ const Messages: React.FC = () => {
     );
   });
 
-  const getSelectedConversation = () => {
-    if (!selectedConversation || !conversations.length) return null;
-    const conversation = conversations.find(c => c.id === selectedConversation);
-    if (!conversation) return null;
-    
-    const otherUserId = getOtherParticipantId(conversation);
-    return {
-      id: selectedConversation,
-      otherUser: {
-        uid: otherUserId,
-        id: otherUserId,
-        email: '',
-        displayName: otherUserId, // This should be replaced with actual user data
-        userType: 'athlete',
-        photoURL: undefined,
-        bio: '',
-        location: '',
-        verified: false,
-        blocked: false,
-        verificationStatus: 'none',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        phoneNumber: '',
-        phoneVerified: false,
-        socialLinks: {
-          instagram: '',
-          twitter: '',
-          linkedin: '',
-          youtube: ''
-        },
-        privacySettings: {
-          profileVisibility: 'public',
-          allowMessagesFrom: 'everyone',
-          showEmail: false,
-          showLocation: false,
-          showAcademicInfo: false,
-          showAthleteStats: false
-        },
-        followers: [],
-        following: [],
-        connections: [],
-        emailVerified: false,
-        lastLogin: new Date().toISOString(),
-        isAdmin: false
-      } as User
-    };
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
+    setSelectedConversation(null);
+    setSelectedGroup(null);
+  };
+
+  const handleGroupSelect = (group: Group) => {
+    setSelectedGroup(group);
+    setSelectedConversation(null);
+  };
+
+  const handleGroupLeave = () => {
+    setSelectedGroup(null);
   };
 
   return (
     <>
       <Header />
       <ChatContainer>
-        {/* Conversations List */}
+        {/* Left Sidebar */}
         <ConversationsList elevation={0}>
-          <Box sx={{ p: 2 }}>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder="Search messages"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon color="action" />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Box>
-          <Divider />
-          <List sx={{ flex: 1, overflow: 'auto' }}>
-            {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
-                <CircularProgress />
-              </Box>
-            ) :
-              filteredConversations.map((conversation) => {
-                const otherUserId = getOtherParticipantId(conversation);
-                const otherUser = otherUsers.get(otherUserId);
-                return (
-                  <ListItem
-                    key={conversation.id}
-                    button
-                    selected={selectedConversation === conversation.id}
-                    onClick={() => setSelectedConversation(conversation.id)}
-                    sx={{
-                      '&:hover': {
-                        backgroundColor: theme.palette.action.hover,
-                      },
-                    }}
-                  >
-                    <ListItemAvatar>
-                      <Avatar src={otherUser?.photoURL}>
-                        {otherUser?.displayName[0]?.toUpperCase() || otherUserId[0]?.toUpperCase()}
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={otherUser?.displayName || otherUserId}
-                      secondary={conversation.last_message}
-                      secondaryTypographyProps={{
-                        noWrap: true,
-                        style: {
-                          maxWidth: '180px',
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
+            variant="fullWidth"
+            sx={{ borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="Direct" />
+            {profile?.userType === 'athlete' && <Tab label="Groups" />}
+          </Tabs>
+
+          <TabPanel value={tabValue} index={0}>
+            <Box sx={{ p: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Search messages"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+            <Divider />
+            <List sx={{ flex: 1, overflow: 'auto' }}>
+              {loading && filteredConversations.length > 0 ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+                  <CircularProgress />
+                </Box>
+              ) : filteredConversations.length === 0 ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', p: 2 }}>
+                  <Typography color="text.secondary" align="center">
+                    {searchQuery ? "No conversations match your search" : "No messages yet. Start a conversation!"}
+                  </Typography>
+                </Box>
+              ) : (
+                filteredConversations.map((conversation) => {
+                  const otherUserId = getOtherParticipantId(conversation);
+                  const otherUser = otherUsers.get(otherUserId);
+                  return (
+                    <ListItem
+                      key={conversation.id}
+                      button
+                      selected={selectedConversation === conversation.id}
+                      onClick={() => {
+                        setSelectedConversation(conversation.id);
+                        setSelectedGroup(null);
+                      }}
+                      sx={{
+                        '&:hover': {
+                          backgroundColor: theme.palette.action.hover,
                         },
                       }}
-                    />
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ ml: 1, minWidth: 60 }}
                     >
-                      {conversation.last_message_time && formatDistanceToNow(new Date(conversation.last_message_time), { addSuffix: true })}
-                    </Typography>
-                  </ListItem>
-                );
-              })
-            }
-          </List>
+                      <ListItemAvatar>
+                        <Avatar src={otherUser?.photoURL}>
+                          {otherUser?.displayName[0]?.toUpperCase() || otherUserId[0]?.toUpperCase()}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={otherUser?.displayName || otherUserId}
+                        secondary={conversation.last_message}
+                        secondaryTypographyProps={{
+                          noWrap: true,
+                          style: {
+                            maxWidth: '180px',
+                          },
+                        }}
+                      />
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ ml: 1, minWidth: 60 }}
+                      >
+                        {conversation.last_message_time && formatDistanceToNow(new Date(conversation.last_message_time), { addSuffix: true })}
+                      </Typography>
+                    </ListItem>
+                  );
+                })
+              )}
+            </List>
+          </TabPanel>
+
+          {profile?.userType === 'athlete' && (
+            <TabPanel value={tabValue} index={1}>
+              <GroupManager onGroupSelect={handleGroupSelect} />
+            </TabPanel>
+          )}
         </ConversationsList>
 
         {/* Chat Area */}
@@ -298,6 +318,11 @@ const Messages: React.FC = () => {
                 />
               );
             })()
+          ) : selectedGroup ? (
+            <GroupChatWindow
+              group={selectedGroup}
+              onLeaveGroup={handleGroupLeave}
+            />
           ) : (
             <Box
               sx={{
@@ -309,7 +334,12 @@ const Messages: React.FC = () => {
                 color: 'text.secondary',
               }}
             >
-              <Typography variant="h6">Select a conversation to start messaging</Typography>
+              <Typography variant="h6">
+                {tabValue === 0
+                  ? "Select a conversation to start messaging"
+                  : "Select or create a group to start chatting"
+                }
+              </Typography>
             </Box>
           )}
         </ChatArea>

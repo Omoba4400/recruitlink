@@ -1,46 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Badge } from '@mui/material';
+import React from 'react';
 import { Message } from '@mui/icons-material';
-import { messageService } from '../services/messageService';
-import { useSelector } from 'react-redux';
-import { RootState } from '../store';
+import { IconButton } from '@mui/material';
 
-interface UnreadMessagesBadgeProps {
+interface MessageIconProps {
   onClick?: () => void;
 }
 
-const UnreadMessagesBadge: React.FC<UnreadMessagesBadgeProps> = ({ onClick }) => {
-  const [unreadCount, setUnreadCount] = useState(0);
-  const user = useSelector((state: RootState) => state.auth.user);
-
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const loadUnreadCount = async () => {
-      try {
-        const count = await messageService.getUnreadCount(user.uid);
-        setUnreadCount(count);
-      } catch (error) {
-        console.error('Error loading unread count:', error);
-      }
-    };
-
-    loadUnreadCount();
-
-    // Subscribe to conversations to update unread count
-    const unsubscribe = messageService.subscribeToConversations(user.uid, async () => {
-      // Reload unread count when conversations update
-      loadUnreadCount();
-    });
-
-    return () => unsubscribe();
-  }, [user?.uid]);
-
+const MessageIcon: React.FC<MessageIconProps> = ({ onClick }) => {
   return (
-    <Badge badgeContent={unreadCount} color="error">
+    <IconButton onClick={onClick} color="inherit">
       <Message />
-    </Badge>
+    </IconButton>
   );
 };
 
-export default UnreadMessagesBadge; 
+export default MessageIcon; 

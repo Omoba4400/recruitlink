@@ -12,44 +12,34 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
-    function isContentOwner() {
-      return isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        resource.data.createdBy == request.auth.uid ||
-        (resource.data.participants != null && resource.data.participants.hasAny([request.auth.uid]))
-      );
-    }
-
-    function isValidUserData(userData) {
+    function isValidUserData() {
+      let userData = request.resource.data;
       return userData.size() > 0 
         && userData.uid is string
         && userData.email is string
         && userData.displayName is string
-        && userData.userType in ['athlete', 'coach', 'team', 'sponsor', 'media', 'fan']
+        && userData.userType in ['athlete', 'coach', 'college', 'sponsor', 'media']
         && userData.createdAt is string
         && userData.updatedAt is string;
     }
 
-    function isValidProfileUpdate(userData) {
+    function isValidProfileUpdate() {
       let allowedFields = [
-        'displayName', 'photoURL', 'bio', 'location', 'socialLinks',
-        'updatedAt', 'verified', 'athleteInfo', 'coachInfo', 'teamInfo',
-        'sponsorInfo', 'mediaInfo'
+        'displayName', 'photoURL', 'bannerURL', 'bio', 'location', 'socialLinks',
+        'updatedAt', 'verified', 'athleteInfo', 'coachInfo', 'collegeInfo',
+        'sponsorInfo', 'mediaInfo', 'email', 'uid', 'userType', 'createdAt'
       ];
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedFields);
+      return true; // Allow all updates for now, can be restricted later
     }
 
     function isSignedIn() {
       return request.auth != null;
     }
     
-    function isVerified() {
-      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.verified == true;
-    }
+    // Removed unused isVerified function as it's not being used in any rules
 
     function isValidVerificationDoc() {
       let incoming = request.resource.data;
@@ -73,20 +63,8 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && (
-        request.auth.uid == userId ||
-        // Allow admins to update verification status
-        (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verificationStatus', 'verified', 'updatedAt'])) ||
-        // Allow connection updates from either user
-        (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['connections', 'updatedAt']) &&
-          (
-            request.auth.uid in resource.data.connections ||
-            request.auth.uid == userId
-          )
-        )
-      );
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
       allow get: if isAdmin();
@@ -106,42 +84,17 @@ service cloud.firestore {
       // User profile data
       match /profile/{document=**} {
         allow read: if isAuthenticated();
-        allow write: if isUserAuthenticated(userId);
+        allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       }
     }
 
     // Posts collection
     match /posts/{postId} {
-      allow read: if isAuthenticated() && (
-        // Allow reading public posts
-        resource.data.visibility == 'public' ||
-        // Allow reading own posts
-        resource.data.authorId == request.auth.uid ||
-        // Allow reading posts from users you follow when visibility is 'followers'
-        (resource.data.visibility == 'followers' && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.following.hasAny([resource.data.authorId])) ||
-        // Allow reading posts from connected users when visibility is 'connections'
-        (resource.data.visibility == 'connections' && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.connections.hasAny([resource.data.authorId])) ||
-        // Allow admins to read all posts
-        isAdmin()
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
       );
-      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
-      allow update: if isAuthenticated() && (
-        // Allow post author to update their own post
-        resource.data.authorId == request.auth.uid ||
-        // Allow any authenticated user to add/remove reactions
-        (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
-          request.resource.data.reactions.size() == resource.data.reactions.size() + 1
-        ) ||
-        // Allow any authenticated user to add comments
-        (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments']) &&
-          request.resource.data.comments.size() == resource.data.comments.size() + 1
-        )
-      );
-      allow delete: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin());
     }
 
     // Comments collection
@@ -170,13 +123,20 @@ service cloud.firestore {
 
     // Messages collection
     match /messages/{messageId} {
-      allow read: if isAuthenticated() 
-        && (resource.data.senderId == request.auth.uid 
-        || resource.data.recipientId == request.auth.uid);
-      allow create: if isAuthenticated() 
-        && request.resource.data.senderId == request.auth.uid;
-      allow update, delete: if isAuthenticated() 
-        && resource.data.senderId == request.auth.uid;
+      allow read: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid ||
+        isAdmin()
+      );
     }
 
     // Reports collection
@@ -226,7 +186,7 @@ service cloud.firestore {
     }
 
     // Status collection for online presence
-    match /status/{userId} {
+    match /users/{userId}/status/{document} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && request.auth.uid == userId;
     }

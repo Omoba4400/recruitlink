@@ -61,6 +61,7 @@ const FirebaseInit = () => {
             phoneVerified: userProfile.phoneVerified || false,
             isAdmin: false,
             verificationStatus: userProfile.verificationStatus || 'none',
+            verificationStep: userProfile.verificationStep || 'email',
             privacySettings: userProfile.privacySettings || {
               profileVisibility: 'public',
               allowMessagesFrom: 'everyone',
@@ -80,7 +81,7 @@ const FirebaseInit = () => {
             connections: userProfile.connections || [],
             athleteInfo: userProfile.athleteInfo,
             coachInfo: userProfile.coachInfo,
-            teamInfo: userProfile.teamInfo,
+            collegeInfo: userProfile.collegeInfo,
             sponsorInfo: userProfile.sponsorInfo,
             mediaInfo: userProfile.mediaInfo
           };
@@ -111,6 +112,7 @@ const FirebaseInit = () => {
             phoneVerified: false,
             isAdmin: false,
             verificationStatus: 'none',
+            verificationStep: 'email',
             privacySettings: {
               profileVisibility: 'public',
               allowMessagesFrom: 'everyone',
@@ -225,6 +227,7 @@ const FirebaseInit = () => {
             phoneVerified: userProfile.phoneVerified || false,
             isAdmin: false,
             verificationStatus: userProfile.verificationStatus || 'none',
+            verificationStep: userProfile.verificationStep || 'email',
             privacySettings: userProfile.privacySettings || {
               profileVisibility: 'public',
               allowMessagesFrom: 'everyone',
@@ -244,7 +247,7 @@ const FirebaseInit = () => {
             connections: userProfile.connections || [],
             athleteInfo: userProfile.athleteInfo,
             coachInfo: userProfile.coachInfo,
-            teamInfo: userProfile.teamInfo,
+            collegeInfo: userProfile.collegeInfo,
             sponsorInfo: userProfile.sponsorInfo,
             mediaInfo: userProfile.mediaInfo
           };

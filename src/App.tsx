@@ -4,7 +4,7 @@ import { useSelector } from 'react-redux';
 import { RootState } from './store/store';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from './config/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import Messages from './pages/Messages';
 import MiniChatContainer, { MiniChatContainerRef } from './components/chat/MiniChatContainer';
 import Header from './components/layout/Header';
@@ -28,8 +28,8 @@ import VerificationDashboard from './pages/admin/VerificationDashboard';
 import AdminRoute from './components/routes/AdminRoute';
 import AdminRoutes from './routes/admin.routes';
 import PostView from './pages/PostView';
-import { supabase } from './config/supabase';
 import PhoneVerification from './pages/PhoneVerification';
+import type { PrivacySettings } from './types/privacy';
 
 const App: React.FC = () => {
   const chatContainerRef = useRef<MiniChatContainerRef>(null);
@@ -46,12 +46,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user?.uid) return;
 
-    const userStatusRef = doc(db, `users/${user.uid}/status`, 'online');
+    const userStatusRef = doc(db, `users/${user.uid}/status/online`);
     
     const updateOnlineStatus = async (status: boolean) => {
       try {
-<<<<<<< Updated upstream
-=======
         // Check if user still exists and has permission to update status
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (!userDoc.exists()) {
@@ -65,22 +63,16 @@ const App: React.FC = () => {
         
         // Only update online status if showOnlineStatus is enabled or undefined (default to true)
         if (privacySettings?.showOnlineStatus !== false) {
->>>>>>> Stashed changes
-        await setDoc(userStatusRef, {
-          online: status,
-          lastSeen: serverTimestamp()
-        }, { merge: true });
-<<<<<<< Updated upstream
-      } catch (error) {
-        console.error('Error updating online status:', error);
-=======
+          await setDoc(userStatusRef, {
+            online: status,
+            lastSeen: serverTimestamp()
+          }, { merge: true });
         }
       } catch (error) {
         // Only log the error if it's not a permission error during account deletion
         if (error instanceof Error && !error.toString().includes('permission')) {
-        console.error('Error updating online status:', error);
+          console.error('Error updating online status:', error);
         }
->>>>>>> Stashed changes
       }
     };
 
@@ -99,27 +91,6 @@ const App: React.FC = () => {
       updateOnlineStatus(false);
     };
   }, [user]);
-
-  const testSupabaseConnection = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('*')
-        .limit(1);
-      
-      if (error) {
-        console.error('Supabase error:', error);
-      } else {
-        console.log('Supabase connection successful:', data);
-      }
-    } catch (err) {
-      console.error('Connection test error:', err);
-    }
-  };
-
-  useEffect(() => {
-    testSupabaseConnection();
-  }, []);
 
   const renderContent = () => {
     if (initializing) {
@@ -149,10 +120,14 @@ const App: React.FC = () => {
           path="/"
           element={
             user ? (
-              emailVerified ? (
-                <Navigate to="/home" replace />
-              ) : (
+              !user.emailVerified ? (
                 <Navigate to="/verify-email" replace />
+              ) : !user.phoneVerified ? (
+                <Navigate to="/verify-phone" replace />
+              ) : !user.verified ? (
+                <Navigate to="/verification" replace />
+              ) : (
+                <Navigate to="/home" replace />
               )
             ) : (
               <Landing />
@@ -163,10 +138,14 @@ const App: React.FC = () => {
           path="/login"
           element={
             user ? (
-              emailVerified ? (
-                <Navigate to="/home" replace />
-              ) : (
+              !user.emailVerified ? (
                 <Navigate to="/verify-email" replace />
+              ) : !user.phoneVerified ? (
+                <Navigate to="/verify-phone" replace />
+              ) : !user.verified ? (
+                <Navigate to="/verification" replace />
+              ) : (
+                <Navigate to="/home" replace />
               )
             ) : (
               <Login />
@@ -177,10 +156,14 @@ const App: React.FC = () => {
           path="/register"
           element={
             user ? (
-              emailVerified ? (
-                <Navigate to="/home" replace />
-              ) : (
+              !user.emailVerified ? (
                 <Navigate to="/verify-email" replace />
+              ) : !user.phoneVerified ? (
+                <Navigate to="/verify-phone" replace />
+              ) : !user.verified ? (
+                <Navigate to="/verification" replace />
+              ) : (
+                <Navigate to="/home" replace />
               )
             ) : (
               <Register />
@@ -192,7 +175,7 @@ const App: React.FC = () => {
         <Route
           path="/verify-email"
           element={
-            user && !emailVerified ? (
+            user && !user.emailVerified ? (
               <VerificationPending />
             ) : (
               <Navigate to="/" replace />
@@ -204,7 +187,7 @@ const App: React.FC = () => {
         <Route
           path="/verify-phone"
           element={
-            user && emailVerified && !user.phoneVerified ? (
+            user && user.emailVerified && !user.phoneVerified ? (
               <PhoneVerification />
             ) : (
               <Navigate to="/" replace />
@@ -212,14 +195,31 @@ const App: React.FC = () => {
           }
         />
 
+        {/* Document verification route */}
+        <Route
+          path="/verification"
+          element={
+            user && user.emailVerified && user.phoneVerified && !user.verified ? (
+              <VerificationForm />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+
+        {/* Admin Routes - Separate from protected routes */}
+        <Route path="/admin/*" element={<AdminRoutes />} />
+
         {/* Protected routes */}
         <Route
           element={
             <PrivateRoute>
-              {user && !emailVerified ? (
+              {!user?.emailVerified ? (
                 <Navigate to="/verify-email" replace />
-              ) : user && !user.phoneVerified ? (
+              ) : !user?.phoneVerified ? (
                 <Navigate to="/verify-phone" replace />
+              ) : !user?.verified ? (
+                <Navigate to="/verification" replace />
               ) : (
                 <Outlet />
               )}
@@ -232,8 +232,6 @@ const App: React.FC = () => {
           <Route path="/view-profile/:userId" element={<ViewProfile />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/messages" element={<Messages />} />
-          <Route path="/verify" element={<VerificationForm />} />
-          <Route path="/admin/*" element={<AdminRoutes />} />
         </Route>
 
         {/* Catch all route */}

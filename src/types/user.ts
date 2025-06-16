@@ -1,4 +1,4 @@
-export type UserType = 'athlete' | 'coach' | 'team' | 'sponsor' | 'media' | 'fan' | 'college' | 'admin';
+export type UserType = 'athlete' | 'coach' | 'sponsor' | 'media' | 'fan' | 'college' | 'admin';
 
 export interface SocialLinks {
   instagram?: string;
@@ -109,15 +109,6 @@ export interface CoachInfo {
   currentTeam?: string;
 }
 
-export interface TeamInfo {
-  teamName: string;
-  sport: string;
-  canMessageAthletes: boolean;
-  achievements: string[];
-  roster: string[];
-  openPositions: string[];
-}
-
 export interface SponsorInfo {
   companyName: string;
   industry: string;
@@ -148,6 +139,13 @@ export interface CollegeInfo {
   division: string;
   conference: string;
   sports: string[];
+  teams: {
+    name: string;
+    sport: string;
+    roster: string[];
+    achievements: string[];
+    openPositions: string[];
+  }[];
   admissionRequirements?: {
     gpa?: number;
     sat?: number;
@@ -160,6 +158,9 @@ export interface CollegeInfo {
     requirements?: string[];
   };
 }
+
+export type VerificationStep = 'email' | 'phone' | 'documents' | 'complete';
+export type VerificationStatus = 'none' | 'pending' | 'approved' | 'rejected';
 
 // Base profile interface
 export interface UserProfile {
@@ -180,7 +181,8 @@ export interface UserProfile {
   phoneNumber?: string;
   phoneVerified: boolean;
   isAdmin: boolean;
-  verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
+  verificationStatus: VerificationStatus;
+  verificationStep: VerificationStep;
   privacySettings: {
     profileVisibility: 'public' | 'private' | 'connections';
     allowMessagesFrom: 'everyone' | 'connections' | 'none';
@@ -200,11 +202,10 @@ export interface UserProfile {
   connections: string[];
   athleteInfo?: AthleteInfo;
   coachInfo?: CoachInfo;
-  teamInfo?: TeamInfo;
+  collegeInfo?: CollegeInfo;
   sponsorInfo?: SponsorInfo;
   mediaInfo?: MediaInfo;
   matchScore?: number;
-  collegeInfo?: CollegeInfo;
 }
 
 // Full user interface including auth-related fields

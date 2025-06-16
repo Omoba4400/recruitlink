@@ -7,7 +7,7 @@ export const sendVerificationCode = async (phoneNumber: string): Promise<{ succe
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ phoneNumber }),
+      body: JSON.stringify({ phoneNumber })
     });
 
     if (!response.ok) {
@@ -33,7 +33,7 @@ export const verifyCode = async (phoneNumber: string, code: string): Promise<{ s
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ phoneNumber, code }),
+      body: JSON.stringify({ phoneNumber, code })
     });
 
     if (!response.ok) {

@@ -106,6 +106,19 @@ const Settings = () => {
         return;
       }
 
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(deleteEmail)) {
+        setDeleteError('Please enter a valid email address');
+        return;
+      }
+
+      // Check if email matches current user's email
+      if (deleteEmail !== user?.email) {
+        setDeleteError('The email address does not match your account');
+        return;
+      }
+
       await deleteUserAccount(deleteEmail, deletePassword);
       enqueueSnackbar('Account deleted successfully', { variant: 'success' });
       navigate('/');
@@ -338,36 +351,61 @@ const Settings = () => {
         </TabPanel>
 
         {/* Delete Account Dialog */}
-        <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
+        <Dialog 
+          open={openDeleteDialog} 
+          onClose={() => {
+            setOpenDeleteDialog(false);
+            setDeleteError(null);
+            setDeleteEmail('');
+            setDeletePassword('');
+          }}
+        >
           <DialogTitle>Delete Account</DialogTitle>
           <DialogContent>
-            <Typography variant="body1" sx={{ mb: 2 }}>
+            <DialogContentText sx={{ mb: 2 }}>
               This action cannot be undone. Please enter your email and password to confirm.
-            </Typography>
+            </DialogContentText>
+            {deleteError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {deleteError}
+              </Alert>
+            )}
             <TextField
               fullWidth
               label="Email"
               type="email"
               value={deleteEmail}
-              onChange={(e) => setDeleteEmail(e.target.value)}
+              onChange={(e) => {
+                setDeleteEmail(e.target.value);
+                setDeleteError(null);
+              }}
               margin="normal"
+              error={!!deleteError && deleteError.toLowerCase().includes('email')}
             />
             <TextField
               fullWidth
               label="Password"
               type="password"
               value={deletePassword}
-              onChange={(e) => setDeletePassword(e.target.value)}
+              onChange={(e) => {
+                setDeletePassword(e.target.value);
+                setDeleteError(null);
+              }}
               margin="normal"
+              error={!!deleteError && deleteError.toLowerCase().includes('password')}
             />
-            {deleteError && (
-              <Typography color="error" sx={{ mt: 1 }}>
-                {deleteError}
-              </Typography>
-            )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setOpenDeleteDialog(false)}>Cancel</Button>
+            <Button 
+              onClick={() => {
+                setOpenDeleteDialog(false);
+                setDeleteError(null);
+                setDeleteEmail('');
+                setDeletePassword('');
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               onClick={handleDeleteAccount}
               color="error"

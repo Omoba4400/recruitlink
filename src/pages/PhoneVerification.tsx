@@ -56,6 +56,38 @@ const PhoneVerification: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [initializing, setInitializing] = useState(true);
+  const user = useSelector((state: RootState) => state.auth.user);
+
+  React.useEffect(() => {
+    // Check if user is authenticated and has proper verification step
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (!user.emailVerified) {
+      navigate('/verify-email');
+      return;
+    }
+
+    if (user.phoneVerified) {
+      navigate('/verification');
+      return;
+    }
+
+    setInitializing(false);
+  }, [user, navigate]);
+
+  if (initializing) {
+    return (
+      <Container maxWidth="sm">
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+          <CircularProgress />
+        </Box>
+      </Container>
+    );
+  }
 
   const handlePhoneNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target.value;
@@ -144,7 +176,7 @@ const PhoneVerification: React.FC = () => {
       // Update Redux state
       dispatch(updatePhoneVerification(true));
       enqueueSnackbar('Phone number verified successfully!', { variant: 'success' });
-      navigate('/home');
+      navigate('/verification');
     } catch (error: any) {
       console.error('Verify code error:', error);
       setError(error.message);
@@ -189,6 +221,7 @@ const PhoneVerification: React.FC = () => {
                 placeholder="(555) 555-5555"
                 margin="normal"
                 required
+                disabled={loading}
                 InputProps={{
                   startAdornment: <InputAdornment position="start">+1</InputAdornment>,
                 }}
@@ -198,9 +231,9 @@ const PhoneVerification: React.FC = () => {
               <Button
                 fullWidth
                 variant="contained"
+                color="primary"
                 onClick={handleSendVerificationCode}
-                disabled={loading || phoneNumber.replace(/\D/g, '').length !== 10}
-                sx={{ mt: 2 }}
+                disabled={loading || !phoneNumber}
               >
                 {loading ? <CircularProgress size={24} /> : 'Send Verification Code'}
               </Button>
@@ -208,7 +241,7 @@ const PhoneVerification: React.FC = () => {
           ) : (
             <>
               <Typography variant="body1" sx={{ mb: 3 }}>
-                Enter the verification code sent to {phoneNumber}
+                Enter the 6-digit verification code sent to {phoneNumber}
               </Typography>
 
               <TextField
@@ -216,32 +249,41 @@ const PhoneVerification: React.FC = () => {
                 label="Verification Code"
                 value={verificationCode}
                 onChange={handleVerificationCodeChange}
+                placeholder="123456"
                 margin="normal"
                 required
-                placeholder="123456"
-                inputProps={{
-                  maxLength: 6,
-                  pattern: '[0-9]*',
-                  inputMode: 'numeric'
-                }}
+                disabled={loading}
+                sx={{ mb: 3 }}
               />
 
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={handleVerifyCode}
-                disabled={loading || verificationCode.length !== 6}
-                sx={{ mt: 2 }}
-              >
-                {loading ? <CircularProgress size={24} /> : 'Verify Code'}
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={() => {
+                    setCodeSent(false);
+                    setVerificationCode('');
+                  }}
+                  disabled={loading}
+                >
+                  Change Number
+                </Button>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="primary"
+                  onClick={handleVerifyCode}
+                  disabled={loading || verificationCode.length !== 6}
+                >
+                  {loading ? <CircularProgress size={24} /> : 'Verify Code'}
+                </Button>
+              </Box>
 
               <Button
                 fullWidth
                 variant="text"
                 onClick={handleSendVerificationCode}
                 disabled={loading}
-                sx={{ mt: 1 }}
               >
                 Resend Code
               </Button>

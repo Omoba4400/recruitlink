@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../../store';
 import {
   Box,
@@ -24,6 +24,7 @@ import { doc, updateDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { uploadToCloudinary } from '../../config/cloudinary';
 import Header from '../layout/Header';
+import { setUser } from '../../store/slices/authSlice';
 
 const VerificationForm: React.FC = () => {
   const user = useSelector((state: RootState) => state.auth.user);
@@ -39,22 +40,49 @@ const VerificationForm: React.FC = () => {
   });
   const [documentUrls, setDocumentUrls] = useState<{ [key: string]: string }>({});
   const [additionalInfo, setAdditionalInfo] = useState('');
+  const dispatch = useDispatch();
+
+  console.log('VerificationForm - Rendering with user:', user);
 
   useEffect(() => {
+    console.log('VerificationForm - useEffect running with:', {
+      user,
+      emailVerified: user?.emailVerified,
+      phoneVerified: user?.phoneVerified,
+      verified: user?.verified
+    });
+
     if (!user) {
+      console.log('VerificationForm - No user, redirecting to login');
       navigate('/login');
       return;
     }
 
-    // If already verified or pending, redirect to profile
-    if (user.verificationStatus === 'approved' || user.verificationStatus === 'pending') {
-      navigate('/profile');
+    // Check verification steps
+    if (!user.emailVerified) {
+      console.log('VerificationForm - Email not verified, redirecting to verify-email');
+      navigate('/verify-email');
       return;
     }
+
+    if (!user.phoneVerified) {
+      console.log('VerificationForm - Phone not verified, redirecting to verify-phone');
+      navigate('/verify-phone');
+      return;
+    }
+
+    // If already verified, redirect to home
+    if (user.verified) {
+      console.log('VerificationForm - User already verified, redirecting to home');
+      navigate('/home');
+      return;
+    }
+
+    console.log('VerificationForm - All checks passed, showing form');
   }, [user, navigate]);
 
   const steps = [
-    'Upload Documents',
+    'Upload Student ID',
     'Additional Information',
     'Review & Submit',
   ];
@@ -72,9 +100,9 @@ const VerificationForm: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    // Check if at least one document is uploaded
-    if (!documents.studentId && !documents.athleteId && !documents.otherDocuments) {
-      setError('Please upload at least one verification document');
+    // For athletes, require student ID
+    if (user?.userType === 'athlete' && !documents.studentId) {
+      setError('Please upload your student ID to proceed');
       setLoading(false);
       return;
     }
@@ -108,11 +136,13 @@ const VerificationForm: React.FC = () => {
   const handleSubmit = async () => {
     if (!user) return;
 
-    // Validate that we have at least one document URL
-    if (Object.keys(documentUrls).length === 0) {
-      setError('Please upload at least one document before submitting');
-      setActiveStep(0); // Go back to upload step
-      return;
+    // Validate required documents based on user type
+    if (user.userType === 'athlete') {
+      if (!documentUrls.studentId) {
+        setError('Student ID is required for athlete verification');
+        setActiveStep(0);
+        return;
+      }
     }
 
     setLoading(true);
@@ -122,7 +152,7 @@ const VerificationForm: React.FC = () => {
       // Create verification document with sanitized data
       const verificationData = {
         userId: user.uid,
-        status: 'pending',
+        status: 'approved',  // Auto-approve after document upload
         documents: documentUrls,
         info: additionalInfo.trim(),
         createdAt: new Date().toISOString(),
@@ -142,21 +172,52 @@ const VerificationForm: React.FC = () => {
 
       // Update user document
       const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        verificationStatus: 'pending',
+      const updatedUserData = {
+        verificationStatus: 'approved' as const,
+        verificationStep: 'complete' as const,
+        verified: true,
         updatedAt: new Date().toISOString()
-      });
+      };
+      await updateDoc(userRef, updatedUserData);
 
-      enqueueSnackbar('Verification request submitted successfully! Please wait for admin approval.', { 
+      // Update Redux state
+      const updatedUser = {
+        ...user,
+        ...updatedUserData
+      };
+      dispatch(setUser(updatedUser));
+
+      enqueueSnackbar('Verification successful!', { 
         variant: 'success',
         autoHideDuration: 6000
       });
-      navigate('/profile');
+
+      // Get the correct redirect path based on user type
+      const redirectPath = getRoleBasedRedirectPath(user.userType);
+      navigate(redirectPath);
     } catch (error) {
       console.error('Error submitting verification:', error);
-      setError('Failed to submit verification request. Please try again.');
-    } finally {
+      setError('Failed to complete verification. Please try again.');
       setLoading(false);
+    }
+  };
+
+  const getRoleBasedRedirectPath = (userType: string): string => {
+    switch (userType) {
+      case 'athlete':
+        return '/home';
+      case 'coach':
+        return '/home';
+      case 'team':
+        return '/profile'; // Teams should complete their profile first
+      case 'sponsor':
+        return '/sponsorships';
+      case 'media':
+        return '/home';
+      case 'admin':
+        return '/admin/dashboard';
+      default:
+        return '/home';
     }
   };
 

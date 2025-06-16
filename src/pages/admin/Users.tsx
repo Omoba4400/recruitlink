@@ -40,7 +40,7 @@ import { useSnackbar } from 'notistack';
 import { UserProfile, UserType } from '../../types/user';
 import { getAllUsers, updateUserRole, deleteUser, verifyUser, blockUser } from '../../services/admin.service';
 
-const userTypes: UserType[] = ['athlete', 'coach', 'team', 'sponsor', 'admin'];
+const userTypes: UserType[] = ['athlete', 'coach', 'college', 'sponsor', 'admin'];
 
 interface EditUserDialogProps {
   open: boolean;

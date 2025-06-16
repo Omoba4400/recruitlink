@@ -56,20 +56,21 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
 };
 
 export const updateUserProfile = async (
-  uid: string,
+  userId: string,
   data: Partial<UserProfile>
 ): Promise<void> => {
   try {
-    const userRef = doc(db, 'users', uid);
+    const userRef = doc(db, 'users', userId);
     const timestamp = new Date().toISOString();
-    
-    await updateDoc(userRef, {
+
+    const updateData = {
       ...data,
-      updatedAt: timestamp,
-    });
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('Error updating user profile:', errorMessage);
+      updatedAt: timestamp
+    };
+
+    await updateDoc(userRef, updateData);
+  } catch (error) {
+    console.error('Error updating user profile:', error);
     throw error;
   }
 };
@@ -199,6 +200,7 @@ export const createUserProfile = async (
       updatedAt: timestamp,
       verified: false,
       verificationStatus: 'none',
+      verificationStep: 'email',
       bio: '',
       location: '',
       socialLinks: {
@@ -225,7 +227,7 @@ export const createUserProfile = async (
       ...baseProfile,
       ...(data.athleteInfo && { athleteInfo: data.athleteInfo }),
       ...(data.coachInfo && { coachInfo: data.coachInfo }),
-      ...(data.teamInfo && { teamInfo: data.teamInfo }),
+      ...(data.collegeInfo && { collegeInfo: data.collegeInfo }),
       ...(data.sponsorInfo && { sponsorInfo: data.sponsorInfo }),
       ...(data.mediaInfo && { mediaInfo: data.mediaInfo })
     };
@@ -261,6 +263,7 @@ export const createUserProfileIfNotExists = async (user: User): Promise<UserProf
         phoneVerified: false,
         isAdmin: false,
         verificationStatus: 'none',
+        verificationStep: 'email',
         followers: [],
         following: [],
         connections: [],
@@ -313,16 +316,6 @@ export const createUserProfileIfNotExists = async (user: User): Promise<UserProf
             canMessageAthletes: false,
             verificationStatus: 'pending'
           }
-        }),
-        ...(user.userType === 'team' && {
-          teamInfo: {
-            teamName: user.teamInfo?.teamName || '',
-            sport: user.teamInfo?.sport || '',
-            canMessageAthletes: false,
-            achievements: [],
-            roster: [],
-            openPositions: []
-          }
         })
       };
 
@@ -343,9 +336,7 @@ export const getTypeSpecificFields = (userType: User['userType']) => {
     case 'athlete':
       return ['sport', 'position', 'graduationYear'];
     case 'college':
-      return ['institutionName', 'division', 'programs'];
-    case 'team':
-      return ['teamName', 'sport', 'level'];
+      return ['institutionName', 'division', 'conference', 'teams'];
     case 'coach':
       return ['specialization', 'experience', 'certifications'];
     case 'sponsor':
@@ -373,111 +364,51 @@ export const updateUserData = async (userId: string, userData: Partial<User>): P
   }
 };
 
-export const getUserSuggestions = async (
-  currentUserId: string,
-  limit: number = 5
-): Promise<UserProfile[]> => {
+export const getUserSuggestions = async (userId: string): Promise<UserProfile[]> => {
   try {
-    console.log('Getting suggestions for user:', currentUserId);
-    
-    // Get current user's profile first to match against
-    const currentUserProfile = await getUserProfile(currentUserId);
-    if (!currentUserProfile) {
-      throw new Error('Current user profile not found');
-    }
+    const userDoc = await getUserProfile(userId);
+    if (!userDoc) throw new Error('User not found');
 
-    // Create array of excluded user IDs (connections and following)
-    const excludedUserIds = [
-      currentUserId,
-      ...(currentUserProfile.connections || []),
-      ...(currentUserProfile.following || [])
+    const usersRef = collection(db, 'users');
+    
+    // Base filters
+    let filters: any[] = [
+      where('uid', '!=', userId),
+      where('blocked', '==', false)
     ];
 
-    // First get all non-admin users
-    const usersRef = collection(db, 'users');
-    // Use a single where clause for better compatibility
-    const q = query(
-      usersRef,
-      where('userType', '!=', 'admin'),
-      firestoreLimit(50) // Fetch more than needed for filtering
-    );
+    // Add type-specific filters
+    switch (userDoc.userType) {
+      case 'athlete':
+        filters.push(
+          where('userType', 'in', ['coach', 'college', 'sponsor'])
+        );
+        break;
+      case 'coach':
+        filters.push(
+          where('userType', 'in', ['athlete', 'college'])
+        );
+        break;
+      case 'college':
+        filters.push(
+          where('userType', 'in', ['athlete', 'coach'])
+        );
+        break;
+      case 'sponsor':
+        filters.push(
+          where('userType', '==', 'athlete')
+        );
+        break;
+      default:
+        filters.push(
+          where('userType', '!=', 'admin')
+        );
+    }
 
+    const q = query(usersRef, ...filters, firestoreLimit(10));
     const querySnapshot = await getDocs(q);
-    const users: UserProfile[] = [];
     
-    // Filter and score users based on matching criteria
-    querySnapshot.forEach((doc) => {
-      const userData = doc.data() as User;  // Cast to User type which includes isAdmin
-      // Additional check for isAdmin in memory
-      if (!excludedUserIds.includes(userData.uid) && userData?.isAdmin !== true) {
-        // Calculate match score
-        let matchScore = 0;
-        let matchFactors = 0;
-
-        // Location matching (25% weight)
-        if (currentUserProfile.location && userData.location) {
-          if (currentUserProfile.location.toLowerCase() === userData.location.toLowerCase()) {
-            matchScore += 25;
-          }
-          matchFactors++;
-        }
-
-        // Sports matching (25% weight)
-        if (currentUserProfile.athleteInfo?.sports && userData.athleteInfo?.sports) {
-          const currentSports = currentUserProfile.athleteInfo.sports.map(s => s.sport.toLowerCase());
-          const userSports = userData.athleteInfo.sports.map(s => s.sport.toLowerCase());
-          const commonSports = currentSports.filter(sport => userSports.includes(sport));
-          
-          if (commonSports.length > 0) {
-            matchScore += (25 * commonSports.length / Math.max(currentSports.length, userSports.length));
-          }
-          matchFactors++;
-        }
-
-        // Activities matching (25% weight)
-        if (currentUserProfile.athleteInfo?.activities && userData.athleteInfo?.activities) {
-          const currentActivities = currentUserProfile.athleteInfo.activities;
-          const userActivities = userData.athleteInfo.activities;
-          const commonActivities = currentActivities.filter(activity => userActivities.includes(activity));
-          
-          if (commonActivities.length > 0) {
-            matchScore += (25 * commonActivities.length / Math.max(currentActivities.length, userActivities.length));
-          }
-          matchFactors++;
-        }
-
-        // User type compatibility (25% weight)
-        const userTypeCompatibility: { [key: string]: string[] } = {
-          'athlete': ['coach', 'team', 'sponsor'],
-          'coach': ['athlete', 'team'],
-          'team': ['athlete', 'coach', 'sponsor'],
-          'sponsor': ['athlete', 'team']
-        };
-
-        if (userTypeCompatibility[currentUserProfile.userType]?.includes(userData.userType)) {
-          matchScore += 25;
-          matchFactors++;
-        }
-
-        // Calculate final score (normalized to 100)
-        const finalScore = matchFactors > 0 ? matchScore / matchFactors : 0;
-        
-        users.push({
-          ...userData,
-          matchScore: finalScore
-        });
-      }
-    });
-
-    console.log('Found matching users:', users.length);
-
-    // Sort by match score and return top matches
-    const sortedUsers = users
-      .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0))
-      .slice(0, limit);
-
-    console.log('Returning top matches:', sortedUsers.length);
-    return sortedUsers;
+    return querySnapshot.docs.map(doc => doc.data() as UserProfile);
   } catch (error) {
     console.error('Error getting user suggestions:', error);
     throw error;
@@ -655,4 +586,38 @@ export const removeFollower = async (
     console.error('Error removing follower:', error);
     throw error;
   }
+};
+
+export const formatUserForPublic = (user: User): Partial<User> => {
+  const baseFields = {
+    uid: user.uid,
+    displayName: user.displayName,
+    photoURL: user.photoURL,
+    userType: user.userType,
+    bio: user.bio,
+    location: user.location,
+    verified: user.verified,
+    verificationStatus: user.verificationStatus,
+    socialLinks: user.socialLinks
+  };
+
+  // Add type-specific fields
+  return {
+    ...baseFields,
+    ...(user.userType === 'athlete' && {
+      athleteInfo: user.athleteInfo
+    }),
+    ...(user.userType === 'coach' && {
+      coachInfo: user.coachInfo
+    }),
+    ...(user.userType === 'college' && {
+      collegeInfo: user.collegeInfo
+    }),
+    ...(user.userType === 'sponsor' && {
+      sponsorInfo: user.sponsorInfo
+    }),
+    ...(user.userType === 'media' && {
+      mediaInfo: user.mediaInfo
+    })
+  };
 }; 

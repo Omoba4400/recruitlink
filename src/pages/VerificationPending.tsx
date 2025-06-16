@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Typography, Button, CircularProgress, Container, Paper } from '@mui/material';
+import { Box, Typography, Button, CircularProgress, Container, Paper, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { checkEmailVerification, resendVerificationEmail, logoutUser } from '../services/auth.service';
-import { setUser, updateEmailVerification } from '../store/slices/authSlice';
 import { useSnackbar } from 'notistack';
-import { RootState } from '../store';
+import { RootState } from '../store/store';
+import { setUser } from '../store/slices/authSlice';
+import { checkEmailVerification, logoutUser, updateUserVerificationStep, resendVerificationEmail } from '../services/auth.service';
 import { auth, db } from '../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { User } from '../types/user';
+import { reload } from 'firebase/auth';
 
 const getRoleBasedRedirectPath = (userType: string): string => {
   switch (userType) {
@@ -53,6 +54,7 @@ const formatUserData = async (firebaseUser: typeof auth.currentUser): Promise<Us
     emailVerified: firebaseUser.emailVerified,
     isAdmin: userData?.isAdmin || false,
     verificationStatus: userData?.verificationStatus || 'none',
+    verificationStep: userData?.verificationStep || 'email',
     privacySettings: userData?.privacySettings || {
       profileVisibility: 'public',
       allowMessagesFrom: 'everyone',
@@ -78,215 +80,160 @@ const VerificationPending: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { enqueueSnackbar } = useSnackbar();
-  const [isChecking, setIsChecking] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
   const [resendDisabled, setResendDisabled] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const [isVerified, setIsVerified] = useState(false);
-  const currentUser = useSelector((state: RootState) => state.auth.user);
+  const user = useSelector((state: RootState) => state.auth.user);
+  const authLoading = useSelector((state: RootState) => state.auth.loading);
+  const initializing = useSelector((state: RootState) => state.auth.initializing);
 
-  // Check if user is already verified on mount
+  const checkEmailVerification = async () => {
+    if (!user || !auth.currentUser) return false;
+
+    try {
+      setVerifying(true);
+      // Reload the user to get fresh email verification status
+      await reload(auth.currentUser);
+      const isVerified = auth.currentUser.emailVerified;
+
+      if (isVerified && !user.emailVerified) { // Only update if state hasn't been updated yet
+        // Update user verification step to phone
+        await updateUserVerificationStep(user.uid, 'phone');
+        
+        // Create updated user object with correct type
+        const updatedUser: User = {
+          ...user,
+          emailVerified: true,
+          verificationStep: 'phone'
+        };
+        
+        dispatch(setUser(updatedUser));
+        
+        // Show success message and navigate only on the first verification
+        enqueueSnackbar('Email verified successfully!', { 
+          variant: 'success',
+          preventDuplicate: true // Prevent duplicate notifications
+        });
+        navigate('/verify-phone');
+        return true;
+      }
+      return isVerified;
+    } catch (error) {
+      console.error('Error checking email verification:', error);
+      return false;
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   useEffect(() => {
-    const checkInitialVerification = async () => {
-      if (!auth.currentUser) {
+    let interval: NodeJS.Timeout;
+    
+    const initializeVerification = async () => {
+      if (!user) {
         navigate('/login');
         return;
       }
 
-      // If user is already verified, redirect to appropriate page
-      if (auth.currentUser.emailVerified) {
-        const userData = await formatUserData(auth.currentUser);
-        dispatch(setUser(userData));
-        dispatch(updateEmailVerification(true));
-        
-        // If phone is not verified, redirect to phone verification
-        if (!userData.phoneVerified) {
-          navigate('/verify-phone');
-          return;
-        }
-        
-        // If both email and phone are verified, redirect to home
-        const redirectPath = getRoleBasedRedirectPath(userData.userType);
-        navigate(redirectPath);
-        return;
-      }
-    };
+      // Initial check
+      const isVerified = await checkEmailVerification();
+      setLoading(false);
 
-    checkInitialVerification();
-  }, [dispatch, navigate]);
-
-  // Auto-check verification status every 5 seconds only if not verified
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    const checkVerification = async () => {
-      try {
-        if (isVerified || !auth.currentUser) return;
-        
-        const verified = await checkEmailVerification();
-        if (verified && auth.currentUser) {
-          setIsVerified(true);
-          const userData = await formatUserData(auth.currentUser);
-          dispatch(setUser(userData));
-          dispatch(updateEmailVerification(true));
-          enqueueSnackbar('Email verified successfully!', { variant: 'success' });
-          clearInterval(interval);
-          
-          // If phone is not verified, redirect to phone verification
-          if (!userData.phoneVerified) {
-            navigate('/verify-phone');
-            return;
+      if (!isVerified) {
+        // Set up polling every 5 seconds only if not verified
+        interval = setInterval(async () => {
+          const verified = await checkEmailVerification();
+          if (verified) {
+            clearInterval(interval);
           }
-          
-          // If both email and phone are verified, redirect to home
-          const redirectPath = getRoleBasedRedirectPath(userData.userType);
-          navigate(redirectPath);
-        }
-      } catch (error) {
-        console.error('Error checking verification status:', error);
+        }, 5000);
       }
     };
 
-    // Only start interval if user is not verified
-    if (!isVerified && auth.currentUser && !auth.currentUser.emailVerified) {
-      interval = setInterval(checkVerification, 5000);
-    }
+    initializeVerification();
 
+    // Cleanup interval on unmount
     return () => {
       if (interval) {
         clearInterval(interval);
       }
     };
-  }, [navigate, dispatch, enqueueSnackbar, isVerified]);
+  }, [user]);
 
-  // Countdown timer for resend button
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (countdown > 0) {
-      timer = setInterval(() => {
-        setCountdown(prev => prev - 1);
-      }, 1000);
-    } else {
-      setResendDisabled(false);
-    }
-    return () => clearInterval(timer);
-  }, [countdown]);
-
-  const handleManualCheck = async () => {
-    if (isVerified || !auth.currentUser) return;
-    
-    setIsChecking(true);
+  const handleResendVerificationEmail = async () => {
     try {
-      const verified = await checkEmailVerification();
-      if (verified && auth.currentUser) {
-        setIsVerified(true);
-        const userData = await formatUserData(auth.currentUser);
-        dispatch(setUser(userData));
-        dispatch(updateEmailVerification(true));
-        enqueueSnackbar('Email verified successfully!', { variant: 'success' });
-        
-        // If phone is not verified, redirect to phone verification
-        if (!userData.phoneVerified) {
-          navigate('/verify-phone');
-          return;
-        }
-        
-        // If both email and phone are verified, redirect to home
-        const redirectPath = getRoleBasedRedirectPath(userData.userType);
-        navigate(redirectPath);
-      } else {
-        enqueueSnackbar('Email not verified yet. Please check your inbox and click the verification link.', { variant: 'info' });
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to check verification status';
-      enqueueSnackbar(errorMessage, { variant: 'error' });
-    } finally {
-      setIsChecking(false);
-    }
-  };
-
-  const handleResendEmail = async () => {
-    try {
-      await resendVerificationEmail();
       setResendDisabled(true);
-      setCountdown(60);
-      enqueueSnackbar('Verification email sent! Please check your inbox.', { variant: 'success' });
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to resend verification email';
-      enqueueSnackbar(errorMessage, { variant: 'error' });
+      const result = await resendVerificationEmail();
+      if (result.verified) {
+        enqueueSnackbar('Your email is already verified!', { 
+          variant: 'success',
+          autoHideDuration: 4000
+        });
+        await checkEmailVerification();
+        return;
+      }
+      if (result.sent) {
+        enqueueSnackbar('Verification email sent! Please check your inbox.', { 
+          variant: 'success',
+          autoHideDuration: 4000
+        });
+      }
+    } catch (error) {
+      console.error('Error sending verification email:', error);
+      enqueueSnackbar(error instanceof Error ? error.message : 'Failed to send verification email', {
+        variant: 'error',
+        autoHideDuration: 6000
+      });
+    } finally {
+      // Re-enable after 60 seconds
+      setTimeout(() => setResendDisabled(false), 60000);
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-      navigate('/login');
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to log out';
-      enqueueSnackbar(errorMessage, { variant: 'error' });
-    }
-  };
-
-  // If user is already verified, don't render anything
-  if (!auth.currentUser || auth.currentUser.emailVerified) {
-    return null;
+  if (initializing) {
+    return (
+      <Container maxWidth="sm">
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+          <CircularProgress />
+        </Box>
+      </Container>
+    );
   }
 
   return (
     <Container maxWidth="sm">
-      <Box sx={{ mt: 8, mb: 4 }}>
-        <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h4" component="h1" gutterBottom>
-            Verify Your Email
+      <Paper elevation={3} sx={{ p: 4, mt: 4 }}>
+        <Typography variant="h5" gutterBottom>
+          Verify Your Email
+        </Typography>
+        <Alert severity="info" sx={{ mb: 3 }}>
+          A verification link has been sent to your email address: {user?.email}
+        </Alert>
+        <Typography paragraph>
+          Please check your email and click the verification link to continue.
+          Once verified, you'll be automatically redirected to the next step.
+        </Typography>
+        <Box mt={3} mb={2}>
+          <Typography variant="body2" color="textSecondary">
+            Haven't received the email? Check your spam folder or click below to resend.
           </Typography>
-          
-          <Typography variant="body1" sx={{ mb: 3 }}>
-            We've sent a verification link to your email address. Please check your inbox and click the link to verify your account.
-          </Typography>
-
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            This page will automatically update when your email is verified.
-          </Typography>
-
-          <Box sx={{ mb: 3 }}>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleManualCheck}
-              disabled={isChecking || isVerified}
-              sx={{ mr: 2 }}
-            >
-              {isChecking ? (
-                <CircularProgress size={24} color="inherit" />
-              ) : (
-                'Check Now'
-              )}
-            </Button>
-
-            <Button
-              variant="outlined"
-              onClick={handleResendEmail}
-              disabled={resendDisabled || isVerified}
-            >
-              {resendDisabled 
-                ? `Resend Email (${countdown}s)` 
-                : 'Resend Verification Email'}
-            </Button>
-          </Box>
-
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Haven't received the email? Check your spam folder or click the resend button above.
-          </Typography>
-
+        </Box>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
           <Button
-            variant="text"
-            color="inherit"
-            onClick={handleLogout}
-            sx={{ mt: 2 }}
+            variant="contained"
+            color="primary"
+            onClick={handleResendVerificationEmail}
+            disabled={resendDisabled}
           >
-            Log Out
+            Resend Verification Email
           </Button>
-        </Paper>
-      </Box>
+          {resendDisabled && (
+            <Typography variant="body2" color="textSecondary">
+              Please wait 60 seconds before requesting another email
+            </Typography>
+          )}
+        </Box>
+      </Paper>
     </Container>
   );
 };

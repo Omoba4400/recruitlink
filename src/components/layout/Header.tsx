@@ -430,9 +430,11 @@ const Header = () => {
             {user?.photoURL ? (
               <Avatar 
                 src={user.photoURL}
+                alt={user?.displayName || 'User'}
                 sx={{
                   width: 40,
                   height: 40,
+                  bgcolor: 'primary.main',
                   border: '2px solid',
                   borderColor: 'background.paper',
                   '&:hover': {
@@ -440,7 +442,15 @@ const Header = () => {
                     transition: 'transform 0.2s'
                   }
                 }}
-              />
+                imgProps={{
+                  onError: (e) => {
+                    const imgElement = e.target as HTMLImageElement;
+                    imgElement.style.display = 'none';
+                  }
+                }}
+              >
+                {user?.displayName?.[0]?.toUpperCase() || <AccountCircle />}
+              </Avatar>
             ) : (
               <Avatar
                 sx={{

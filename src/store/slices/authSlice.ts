@@ -2,9 +2,11 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { User } from '../../types/user';
 import { updateUserData } from '../../services/user.service';
 import { AppThunk, AppDispatch, RootState } from '../../store/store';
+import { UserProfile } from '../../types/user';
 
 interface AuthState {
   user: User | null;
+  profile: UserProfile | null;
   loading: boolean;
   error: string | null;
   emailVerified: boolean;
@@ -13,6 +15,7 @@ interface AuthState {
 
 const initialState: AuthState = {
   user: null,
+  profile: null,
   loading: false,
   error: null,
   emailVerified: false,
@@ -58,6 +61,14 @@ const authSlice = createSlice({
         initializing: state.initializing 
       });
     },
+    setProfile: (state: AuthState, action: PayloadAction<UserProfile | null>) => {
+      console.log('authSlice - setProfile:', { payload: action.payload });
+      state.profile = action.payload;
+      state.error = null;
+      console.log('authSlice - setProfile - new state:', { 
+        profile: state.profile
+      });
+    },
     setLoading: (state: AuthState, action: PayloadAction<boolean>) => {
       console.log('authSlice - setLoading:', { payload: action.payload });
       state.loading = action.payload;
@@ -72,6 +83,7 @@ const authSlice = createSlice({
     },
     clearUser: (state: AuthState) => {
       state.user = null;
+      state.profile = null;
       state.error = null;
       state.emailVerified = false;
       state.loading = false;
@@ -99,6 +111,7 @@ const authSlice = createSlice({
 
 export const {
   setUser,
+  setProfile,
   setLoading,
   setError,
   clearUser,

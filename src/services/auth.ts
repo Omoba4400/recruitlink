@@ -36,6 +36,7 @@ const formatUserData = (userCredential: UserCredential, userType?: string): User
     following: [],
     connections: [],
     verificationStatus: 'none',
+    verificationStep: 'email',
     privacySettings: {
       profileVisibility: 'public',
       allowMessagesFrom: 'everyone',

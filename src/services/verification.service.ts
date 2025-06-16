@@ -78,7 +78,7 @@ export const submitVerificationRequest = async (
         fileName: file.name,
         mimeType: file.type,
         uploadedAt: new Date().toISOString(),
-        status: 'pending'
+        status: 'approved' // Auto-approve for student ID
       };
       
       const docRef = await addDoc(collection(db, VERIFICATION_DOCS_COLLECTION), docData);
@@ -87,12 +87,16 @@ export const submitVerificationRequest = async (
     
     const uploadedDocs = await Promise.all(uploadPromises);
     
+    // Check if this is a student ID upload
+    const hasStudentId = documents.some(doc => doc.type === 'studentId');
+    const verificationStatus = hasStudentId ? 'approved' : 'pending';
+    
     // Create verification request
     const verificationData: Omit<VerificationRequest, 'id'> = {
       userId,
       userType,
       submittedAt: new Date().toISOString(),
-      status: 'pending',
+      status: verificationStatus,
       documents: uploadedDocs,
       institutionName: data.institutionName,
       studentId: data.studentId,
@@ -106,8 +110,8 @@ export const submitVerificationRequest = async (
     
     // Update user profile verification status
     await updateUserProfile(userId, {
-      verified: false,
-      verificationStatus: 'pending'
+      verified: hasStudentId, // Auto-verify if student ID is uploaded
+      verificationStatus: verificationStatus
     });
     
     return verificationRef.id;

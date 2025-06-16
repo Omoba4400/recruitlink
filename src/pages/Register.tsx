@@ -67,10 +67,15 @@ interface FormData {
   collegeInfo?: {
     institutionName: string;
     division: string;
-  };
-  teamInfo?: {
-    teamName: string;
-    sport: string;
+    conference: string;
+    location: string;
+    teams: {
+      name: string;
+      sport: string;
+      roster: string[];
+      achievements: string[];
+      openPositions: string[];
+    }[];
   };
   coachInfo?: {
     specialization: string[];
@@ -151,6 +156,7 @@ const formatUserData = (firebaseUser: any): User => {
     phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
+    verificationStep: 'email',
     privacySettings: {
       profileVisibility: 'public',
       allowMessagesFrom: 'everyone',
@@ -190,8 +196,7 @@ const Register: React.FC = () => {
     }));
   };
 
-  const handleSelectChange = (e: SelectChangeEvent<UserType>) => {
-    const userType = e.target.value as UserType;
+  const handleSelectChange = (userType: UserType) => {
     setFormData((prev) => ({
       ...prev,
       userType,
@@ -221,20 +226,17 @@ const Register: React.FC = () => {
         recruitingStatus: 'open'
       } : undefined,
       collegeInfo: userType === 'college' ? {
-        name: '',
-        location: '',
-        conference: '',
-        sports: [],
         institutionName: '',
-        division: ''
-      } : undefined,
-      teamInfo: userType === 'team' ? {
-        teamName: '',
-        sport: '',
-        canMessageAthletes: false,
-        achievements: [],
-        roster: [],
-        openPositions: []
+        division: '',
+        conference: '',
+        location: '',
+        teams: [{
+          name: '',
+          sport: '',
+          roster: [],
+          achievements: [],
+          openPositions: []
+        }]
       } : undefined,
       coachInfo: userType === 'coach' ? {
         specialization: [],
@@ -258,7 +260,7 @@ const Register: React.FC = () => {
     }));
   };
 
-  type InfoType = 'athleteInfo' | 'collegeInfo' | 'teamInfo' | 'coachInfo' | 'sponsorInfo' | 'mediaInfo';
+  type InfoType = 'athleteInfo' | 'collegeInfo' | 'coachInfo' | 'sponsorInfo' | 'mediaInfo';
 
   const updateTypeSpecificField = (
     type: InfoType,
@@ -409,29 +411,6 @@ const Register: React.FC = () => {
             />
           </>
         );
-      case 'team':
-        return (
-          <>
-            <TextField
-              required
-              fullWidth
-              name="teamName"
-              label="Team Name"
-              value={formData.teamInfo?.teamName || ''}
-              onChange={(e) => updateTypeSpecificField('teamInfo', 'teamName', e.target.value)}
-              {...inputProps}
-            />
-            <TextField
-              required
-              fullWidth
-              name="sport"
-              label="Sport"
-              value={formData.teamInfo?.sport || ''}
-              onChange={(e) => updateTypeSpecificField('teamInfo', 'sport', e.target.value)}
-              {...inputProps}
-            />
-          </>
-        );
       case 'coach':
         return (
           <>
@@ -546,18 +525,11 @@ const Register: React.FC = () => {
         athleteInfo: formData.athleteInfo,
         collegeInfo: formData.userType === 'college' ? {
           name: formData.collegeInfo?.institutionName || '',
-          location: '',
-          conference: formData.collegeInfo?.division || '',
+          location: formData.collegeInfo?.location || '',
+          conference: formData.collegeInfo?.conference || '',
           sports: [],
-          division: formData.collegeInfo?.division || ''
-        } : undefined,
-        teamInfo: formData.userType === 'team' ? {
-          teamName: formData.teamInfo?.teamName || '',
-          sport: formData.teamInfo?.sport || '',
-          canMessageAthletes: false,
-          achievements: [],
-          roster: [],
-          openPositions: []
+          division: formData.collegeInfo?.division || '',
+          teams: formData.collegeInfo?.teams || []
         } : undefined,
         coachInfo: formData.userType === 'coach' ? {
           specialization: formData.coachInfo?.specialization || [],
@@ -761,7 +733,7 @@ const Register: React.FC = () => {
                 name="userType"
                 value={formData.userType}
                 label="I am a..."
-                onChange={handleSelectChange}
+                onChange={(e) => handleSelectChange(e.target.value as UserType)}
               >
                 <MenuItem value="athlete">College Athlete</MenuItem>
                 <MenuItem value="college">College/University</MenuItem>

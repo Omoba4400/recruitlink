@@ -88,13 +88,17 @@ import {
   People,
   PersonAdd,
   MoreHoriz,
+  Category,
+  LocalOffer,
+  SportsSoccer,
+  Groups,
 } from '@mui/icons-material';
 import Header from '../components/layout/Header';
 import { uploadToCloudinary } from '../config/cloudinary';
 import { getUserProfile, updateUserProfile, updateSocialLinks } from '../services/user.service';
 import { useSnackbar } from 'notistack';
 import { linkSocialAccount } from '../services/social-auth.service';
-import { setProfile } from '../store/slices/authSlice';
+import { setProfile, setUser } from '../store/slices/authSlice';
 import LocationAutocomplete from '../components/LocationAutocomplete';
 import { User as FirebaseUser } from 'firebase/auth';
 import type {
@@ -103,10 +107,9 @@ import type {
   UserType,
   AthleteInfo,
   CoachInfo,
-  TeamInfo,
+  CollegeInfo,
   SponsorInfo,
   MediaInfo,
-  PrivacySettings,
   SocialLinks,
   AthleteStats,
   AcademicInfo
@@ -161,15 +164,6 @@ const defaultSocialLinks: SocialLinks = {
   youtube: ''
 };
 
-const defaultPrivacySettings: PrivacySettings = {
-  profileVisibility: 'public',
-  allowMessagesFrom: 'everyone',
-  showEmail: true,
-  showLocation: true,
-  showAcademicInfo: true,
-  showAthleteStats: true,
-};
-
 const defaultAthleteInfo: AthleteInfo = {
   sports: [{
     sport: 'Not specified',
@@ -204,13 +198,24 @@ const defaultCoachInfo: CoachInfo = {
   verificationStatus: 'pending'
 };
 
-const defaultTeamInfo: TeamInfo = {
-  teamName: 'Not specified',
-  sport: 'Not specified',
-  canMessageAthletes: false,
-  achievements: [],
-  roster: [],
-  openPositions: []
+const defaultCollegeInfo: CollegeInfo = {
+  name: '',
+  location: '',
+  division: '',
+  conference: '',
+  sports: [],
+  teams: [],
+  admissionRequirements: {
+    gpa: undefined,
+    sat: undefined,
+    act: undefined,
+    otherRequirements: []
+  },
+  athleticScholarships: {
+    available: false,
+    types: [],
+    requirements: []
+  }
 };
 
 const defaultSponsorInfo: SponsorInfo = {
@@ -532,6 +537,9 @@ const Profile: React.FC = () => {
   const [isPostingLoading, setIsPostingLoading] = useState(false);
   const postMediaInputRef = useRef<HTMLInputElement>(null);
 
+  // Don't show connect/follow buttons if viewing own profile
+  const isOwnProfile = user?.uid === profileData?.uid;
+
   // Memoize the PostsTab component props
   const postsTabProps = React.useMemo(() => ({
     userId: id || user?.uid || '',
@@ -759,7 +767,11 @@ const Profile: React.FC = () => {
 
       // Save to Firebase and update Redux
       await updateUserProfile(user.uid, updatedData);
-      dispatch(setProfile({ ...profileData, ...updatedData }));
+      
+      // Update both profile and user in Redux
+      const updatedProfile = { ...profileData, ...updatedData };
+      dispatch(setProfile(updatedProfile));
+      dispatch(setUser({ ...user, ...updatedData }));
 
       enqueueSnackbar(`${type.charAt(0).toUpperCase() + type.slice(1)} updated successfully`, { variant: 'success' });
     } catch (error) {
@@ -1028,7 +1040,7 @@ const Profile: React.FC = () => {
   );
 
   const renderAboutSection = () => (
-    <Paper sx={{ p: 3, mb: 2 }}>
+    <>
       <Typography variant="h6" gutterBottom>About</Typography>
       {isEditing ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1046,20 +1058,58 @@ const Profile: React.FC = () => {
           />
         </Box>
       ) : (
-        <>
-          <Typography paragraph>
-            {profileData?.bio || 'No bio added yet.'}
-          </Typography>
-          {profileData?.location && (
-            <Box display="flex" alignItems="center">
-              <LocationOn sx={{ mr: 1, color: 'action.active' }} />
-              <Typography color="textSecondary">{profileData.location}</Typography>
-            </Box>
-          )}
-        </>
+        <Typography paragraph>
+          {profileData?.bio || 'No bio added yet.'}
+        </Typography>
       )}
-    </Paper>
+    </>
   );
+
+  const renderEducationSection = () => {
+    if (!profileData || profileData.userType !== 'athlete' || !profileData.athleteInfo?.academicInfo) return null;
+
+    const { athleteInfo } = profileData;
+    const { academicInfo } = athleteInfo;
+
+    return (
+      <>
+        <Typography variant="h6" gutterBottom>Education</Typography>
+        {isEditing ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              fullWidth
+              label="School"
+              value={academicInfo.currentSchool || ''}
+              onChange={(e) => handleAthleteInfoChange('academicInfo', {
+                ...academicInfo,
+                currentSchool: e.target.value
+              })}
+            />
+            <TextField
+              fullWidth
+              label="Graduation Year"
+              type="number"
+              value={academicInfo.graduationYear || ''}
+              onChange={(e) => handleAthleteInfoChange('academicInfo', {
+                ...academicInfo,
+                graduationYear: e.target.value
+              })}
+            />
+          </Box>
+        ) : (
+          <List>
+            <ListItem>
+              <ListItemIcon><School /></ListItemIcon>
+              <ListItemText
+                primary={academicInfo.currentSchool || 'Add your school'}
+                secondary={`Class of ${academicInfo.graduationYear || 'Not specified'}`}
+              />
+            </ListItem>
+          </List>
+        )}
+      </>
+    );
+  };
 
   const renderAthleteFields = () => {
     if (!profileData || profileData.userType !== 'athlete') return null;
@@ -1238,6 +1288,168 @@ const Profile: React.FC = () => {
     }
   };
 
+  const renderCollegeInfo = (collegeInfo: CollegeInfo) => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        College Information
+      </Typography>
+      <List>
+        <ListItem>
+          <ListItemIcon>
+            <School />
+          </ListItemIcon>
+          <ListItemText
+            primary="College Name"
+            secondary={collegeInfo.name || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <LocationOn />
+          </ListItemIcon>
+          <ListItemText
+            primary="Location"
+            secondary={collegeInfo.location || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <Category />
+          </ListItemIcon>
+          <ListItemText
+            primary="Division"
+            secondary={collegeInfo.division || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <Group />
+          </ListItemIcon>
+          <ListItemText
+            primary="Conference"
+            secondary={collegeInfo.conference || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <SportsSoccer />
+          </ListItemIcon>
+          <ListItemText
+            primary="Sports"
+            secondary={collegeInfo.sports.join(', ') || 'None'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <Groups />
+          </ListItemIcon>
+          <ListItemText
+            primary="Teams"
+            secondary={collegeInfo.teams.map(team => team.name).join(', ') || 'None'}
+          />
+        </ListItem>
+      </List>
+    </Box>
+  );
+
+  const renderSponsorInfo = (sponsorInfo: SponsorInfo) => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        Sponsor Information
+      </Typography>
+      <List>
+        <ListItem>
+          <ListItemIcon>
+            <Business />
+          </ListItemIcon>
+          <ListItemText
+            primary="Company Name"
+            secondary={sponsorInfo.companyName || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <Category />
+          </ListItemIcon>
+          <ListItemText
+            primary="Industry"
+            secondary={sponsorInfo.industry || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <LocalOffer />
+          </ListItemIcon>
+          <ListItemText
+            primary="Sponsorship Types"
+            secondary={sponsorInfo.sponsorshipTypes.join(', ') || 'None'}
+          />
+        </ListItem>
+      </List>
+    </Box>
+  );
+
+  const renderMediaInfo = (mediaInfo: MediaInfo) => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        Media Information
+      </Typography>
+      <List>
+        <ListItem>
+          <ListItemIcon>
+            <Business />
+          </ListItemIcon>
+          <ListItemText
+            primary="Company Name"
+            secondary={mediaInfo.companyName || 'Not specified'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <Category />
+          </ListItemIcon>
+          <ListItemText
+            primary="Coverage Areas"
+            secondary={mediaInfo.coverageAreas?.join(', ') || 'None'}
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <VideoLibrary />
+          </ListItemIcon>
+          <ListItemText
+            primary="Media Types"
+            secondary={mediaInfo.mediaType?.join(', ') || 'None'}
+          />
+        </ListItem>
+      </List>
+    </Box>
+  );
+
+  const renderTypeSpecificInfo = () => {
+    if (!profileData) return null;
+
+    switch (profileData.userType) {
+      case 'athlete':
+        if (!profileData.athleteInfo) return null;
+        return renderAthleteFields();
+      case 'coach':
+        if (!profileData.coachInfo) return null;
+        return renderCoachFields();
+      case 'college':
+        if (!profileData.collegeInfo) return null;
+        return renderCollegeInfo(profileData.collegeInfo);
+      case 'sponsor':
+        if (!profileData.sponsorInfo) return null;
+        return renderSponsorInfo(profileData.sponsorInfo);
+      case 'media':
+        if (!profileData.mediaInfo) return null;
+        return renderMediaInfo(profileData.mediaInfo);
+      default:
+        return null;
+    }
+  };
+
   const renderCoachFields = (): JSX.Element | null => {
     if (!profileData || profileData.userType !== 'coach') return null;
 
@@ -1284,52 +1496,6 @@ const Profile: React.FC = () => {
         [field]: value
       }
     });
-  };
-
-  const renderEducationSection = () => {
-    if (!profileData || profileData.userType !== 'athlete' || !profileData.athleteInfo?.academicInfo) return null;
-
-    const { athleteInfo } = profileData;
-    const { academicInfo } = athleteInfo;
-
-    return (
-      <Paper sx={{ p: 3, mb: 2 }}>
-        <Typography variant="h6" gutterBottom>Education</Typography>
-        {isEditing ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              fullWidth
-              label="School"
-              value={academicInfo.currentSchool || ''}
-              onChange={(e) => handleAthleteInfoChange('academicInfo', {
-                ...academicInfo,
-                currentSchool: e.target.value
-              })}
-            />
-            <TextField
-              fullWidth
-              label="Graduation Year"
-              type="number"
-              value={academicInfo.graduationYear || ''}
-              onChange={(e) => handleAthleteInfoChange('academicInfo', {
-                ...academicInfo,
-                graduationYear: e.target.value
-              })}
-            />
-          </Box>
-        ) : (
-          <List>
-            <ListItem>
-              <ListItemIcon><School /></ListItemIcon>
-              <ListItemText
-                primary={academicInfo.currentSchool || 'Add your school'}
-                secondary={`Class of ${academicInfo.graduationYear || 'Not specified'}`}
-              />
-            </ListItem>
-          </List>
-        )}
-      </Paper>
-    );
   };
 
   const renderSocialLinks = (): JSX.Element => {
@@ -1397,354 +1563,151 @@ const Profile: React.FC = () => {
     );
   };
 
-  const renderVerificationStatus = () => {
-    if (!profileData) return null;
-
-    const isPending = profileData.verificationStatus === 'pending';
-    const isApproved = profileData.verificationStatus === 'approved';
-    const isRejected = profileData.verificationStatus === 'rejected';
-    const isNone = !profileData.verificationStatus || profileData.verificationStatus === 'none';
-
-    return (
-      <Box sx={{ width: '100%' }}>
-        <Paper sx={{ p: 3 }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Box display="flex" alignItems="center">
-              <Verified 
-                color={isApproved ? "primary" : "action"} 
-                sx={{ mr: 1 }} 
-              />
-              <Box>
-                <Typography variant="h6">Verification Status</Typography>
-                <Typography variant="body2" color="textSecondary">
-                  {isPending && "Your verification request is being reviewed"}
-                  {isApproved && "Your profile is verified"}
-                  {isRejected && "Your verification request was rejected"}
-                  {isNone && "Request verification to get a blue checkmark"}
-                </Typography>
-              </Box>
-            </Box>
-            {!isApproved && user?.uid === profileData.uid && !isPending && (
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<Verified />}
-                onClick={handleVerificationRequest}
-              >
-                Request Verification
-              </Button>
-            )}
-          </Box>
-        </Paper>
-      </Box>
-    );
-  };
-
-  const renderTeamFields = () => {
-    if (!profileData?.teamInfo) return null;
-
-    const teamInfo = profileData.teamInfo;
-    const fields = [
-      { key: 'teamName', label: 'Team Name', icon: <Group /> },
-      { key: 'sport', label: 'Sport', icon: <Business /> },
-      { key: 'achievements', label: 'Achievements', icon: <EmojiEvents /> },
-      { key: 'openPositions', label: 'Open Positions', icon: <Group /> }
-    ] as const;
-
-    return (
-      <Box>
-        <Typography variant="h6" gutterBottom>
-          Team Information
-        </Typography>
-        <List>
-          {fields.map(({ key, label, icon }) => (
-            <ListItem key={key}>
-              <ListItemIcon>
-                {icon}
-              </ListItemIcon>
-              <ListItemText
-                primary={label}
-                secondary={
-                  Array.isArray(teamInfo[key])
-                    ? (teamInfo[key] as string[]).join(', ') || 'None'
-                    : teamInfo[key] || 'Not specified'
-                }
-              />
-            </ListItem>
-          ))}
-        </List>
-      </Box>
-    );
-  };
-
-  const renderTeamContent = () => {
-    if (!profileData) return null;
-
-    switch (profileData.userType) {
-      case 'athlete':
-        return (
-          <Box sx={{ width: '100%' }}>
-            {renderAthleteFields()}
-          </Box>
-        );
-      case 'coach':
-        return (
-          <Box sx={{ width: '100%' }}>
-            {renderCoachFields()}
-          </Box>
-        );
-      case 'team':
-        return (
-          <Box sx={{ width: '100%' }}>
-            {renderTeamFields()}
-          </Box>
-        );
-      case 'sponsor':
-        return (
-          <Box sx={{ width: '100%' }}>
-            {/* Sponsor-specific content */}
-            <Typography>Sponsor information coming soon</Typography>
-          </Box>
-        );
-      case 'media':
-        return (
-          <Box sx={{ width: '100%' }}>
-            {/* Media-specific content */}
-            <Typography>Media information coming soon</Typography>
-          </Box>
-        );
-      case 'college':
-        return (
-          <Box sx={{ width: '100%' }}>
-            {/* College-specific content */}
-            <Typography>College information coming soon</Typography>
-          </Box>
-        );
-      default:
-        return (
-          <Box sx={{ width: '100%' }}>
-            <Typography>No additional information available</Typography>
-          </Box>
-        );
-    }
-  };
-
-  console.log('Rendering profile with data:', profileData);
-
-  // Don't show connect/follow buttons if viewing own profile
-  const isOwnProfile = user?.uid === profileData.uid;
-
-  const renderPostDialog = () => (
-    <Dialog
-      open={openPostDialog}
-      onClose={handlePostDialogClose}
-      maxWidth="sm"
-      fullWidth
-    >
-      <DialogTitle>Create Post</DialogTitle>
-      <DialogContent>
-        <Box sx={{ mt: 2 }}>
-          <TextField
-            autoFocus
-            multiline
-            rows={4}
-            fullWidth
-            placeholder="What's on your mind?"
-            value={newPostContent}
-            onChange={(e) => setNewPostContent(e.target.value)}
-            disabled={isPostingLoading}
-          />
-          
-          {/* Media Previews */}
-          {postMediaPreviews.length > 0 && (
-            <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {postMediaPreviews.map((preview, index) => (
-                <Box
-                  key={index}
-                  sx={{
-                    position: 'relative',
-                    width: 100,
-                    height: 100,
-                  }}
-                >
-                  <img
-                    src={preview}
-                    alt={`Preview ${index + 1}`}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      borderRadius: 4
-                    }}
-                  />
-                  <IconButton
-                    size="small"
-                    sx={{
-                      position: 'absolute',
-                      top: -8,
-                      right: -8,
-                      bgcolor: 'background.paper',
-                      '&:hover': { bgcolor: 'background.paper' }
-                    }}
-                    onClick={() => handleRemoveMedia(index)}
-                  >
-                    <Close fontSize="small" />
-                  </IconButton>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </Box>
-      </DialogContent>
-      <DialogActions sx={{ p: 2, gap: 1 }}>
-        <input
-          type="file"
-          multiple
-          accept="image/*,video/*"
-          style={{ display: 'none' }}
-          ref={postMediaInputRef}
-          onChange={handlePostMediaSelect}
-        />
-        <Button
-          startIcon={<Image />}
-          onClick={() => postMediaInputRef.current?.click()}
-          disabled={isPostingLoading}
-        >
-          Add Media
-        </Button>
-        <Box sx={{ flex: 1 }} />
-        <Button onClick={handlePostDialogClose} disabled={isPostingLoading}>
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleCreatePost}
-          disabled={!newPostContent.trim() || isPostingLoading}
-        >
-          {isPostingLoading ? (
-            <CircularProgress size={24} />
-          ) : (
-            'Post'
-          )}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-
   return (
-    <Box>
+    <>
       <Header />
-      <Container maxWidth="lg" sx={{ mt: 10, mb: 4 }}>
-        {loading ? (
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-            <CircularProgress />
-          </Box>
-        ) : error ? (
-          <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography color="error" variant="h6">{error}</Typography>
-            <Button variant="contained" onClick={() => navigate('/home')} sx={{ mt: 2 }}>
-              Return to Home
-            </Button>
+      <Box sx={{ pt: 8 }}>
+        <Container maxWidth="lg" sx={{ py: 3 }}>
+          {renderProfileHeader()}
+          
+          {/* Tabs */}
+          <Paper sx={{ mb: 3 }}>
+            <Tabs
+              value={activeTab}
+              onChange={handleTabChange}
+              aria-label="profile tabs"
+              variant="fullWidth"
+            >
+              <Tab label="About" />
+              <Tab label="Posts" />
+            </Tabs>
           </Paper>
-        ) : (
-          <Grid container spacing={3}>
-            {/* Main Content Column */}
-            <Grid item xs={12} md={8}>
-              {renderProfileHeader()}
-              {renderAboutSection()}
+
+          {/* Tab Panels */}
+          <TabPanel value={activeTab} index={0}>
+            <Grid container spacing={3}>
+              {/* Left column - Profile details */}
+              <Grid item xs={12} md={8}>
+                <Paper sx={{ p: 3, mb: 3 }}>
+                  {renderAboutSection()}
+                </Paper>
+                <Paper sx={{ p: 3, mb: 3 }}>
+                  {renderTypeSpecificInfo()}
+                </Paper>
+                <Paper sx={{ p: 3 }}>
+                  {renderEducationSection()}
+                </Paper>
+              </Grid>
               
-              {/* Athletic Information Section */}
-              <Paper sx={{ p: 3, mb: 2, borderRadius: 2, width: '100%' }}>
-                <Typography variant="h6" gutterBottom>
-                  {profileData?.userType.charAt(0).toUpperCase() + profileData?.userType.slice(1)} Information
-                </Typography>
-                {renderTeamContent()}
-              </Paper>
-
-              {/* Posts Section */}
-              <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Typography variant="h6">Posts</Typography>
-                  {isOwnProfile && (
-                    <Button
-                      variant="contained"
-                      startIcon={<Add />}
-                      onClick={() => setOpenPostDialog(true)}
-                    >
-                      Create Post
-                    </Button>
-                  )}
-                </Box>
-                <PostsTab {...postsTabProps} />
-              </Paper>
-            </Grid>
-
-            {/* Right Sidebar */}
-            <Grid item xs={12} md={4}>
-              {/* Profile Strength */}
-              <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
-                <Typography variant="h6" gutterBottom>Profile Strength</Typography>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={70} 
-                  sx={{ height: 8, borderRadius: 4 }} 
-                />
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  Complete your profile to increase visibility
-                </Typography>
-              </Paper>
-
-              {/* Social Links */}
-              <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
-                <Typography variant="h6" gutterBottom>Social Links</Typography>
-                {renderSocialLinks()}
-              </Paper>
-
-              {/* Verification Status */}
-              {renderVerificationStatus()}
-
-              {/* Privacy Settings */}
-              {isOwnProfile && (
-                <Paper sx={{ p: 3, mb: 2, borderRadius: 2 }}>
-                  <Typography variant="h6" gutterBottom>Profile Privacy</Typography>
+              {/* Right column - Social links */}
+              <Grid item xs={12} md={4}>
+                <Paper sx={{ p: 3, height: 'fit-content' }}>
+                  <Typography variant="h6" gutterBottom>Social Links</Typography>
                   <List>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Public />
-                      </ListItemIcon>
-                      <ListItemText 
-                        primary="Profile Visibility"
-                        secondary={profileData?.privacySettings?.profileVisibility || 'Public'}
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton>
-                          <EditIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Message />
-                      </ListItemIcon>
-                      <ListItemText 
-                        primary="Message Settings"
-                        secondary={profileData?.privacySettings?.allowMessagesFrom || 'Everyone'}
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton>
-                          <EditIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
+                    {renderSocialLinks()}
                   </List>
                 </Paper>
-              )}
+              </Grid>
             </Grid>
-          </Grid>
-        )}
-        {renderPostDialog()}
-      </Container>
-    </Box>
+          </TabPanel>
+
+          <TabPanel value={activeTab} index={1}>
+            {/* Create Post Button */}
+            {isOwnProfile && (
+              <Box sx={{ mb: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  variant="contained"
+                  startIcon={<Add />}
+                  onClick={() => setOpenPostDialog(true)}
+                  sx={{ px: 3 }}
+                >
+                  Create New Post
+                </Button>
+              </Box>
+            )}
+
+            {/* Posts Tab Content */}
+            <PostsTab {...postsTabProps} />
+          </TabPanel>
+
+          {/* Create Post Dialog */}
+          <Dialog
+            open={openPostDialog}
+            onClose={handlePostDialogClose}
+            maxWidth="sm"
+            fullWidth
+          >
+            <DialogTitle>Create New Post</DialogTitle>
+            <DialogContent>
+              <TextField
+                autoFocus
+                margin="dense"
+                fullWidth
+                multiline
+                rows={4}
+                placeholder="What's on your mind?"
+                value={newPostContent}
+                onChange={(e) => setNewPostContent(e.target.value)}
+              />
+              {/* Media Preview */}
+              {postMediaPreviews.length > 0 && (
+                <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {postMediaPreviews.map((preview, index) => (
+                    <Box
+                      key={index}
+                      sx={{ position: 'relative' }}
+                    >
+                      <img
+                        src={preview}
+                        alt={`Preview ${index + 1}`}
+                        style={{ width: 100, height: 100, objectFit: 'cover' }}
+                      />
+                      <IconButton
+                        size="small"
+                        sx={{
+                          position: 'absolute',
+                          top: -8,
+                          right: -8,
+                          bgcolor: 'background.paper'
+                        }}
+                        onClick={() => handleRemoveMedia(index)}
+                      >
+                        <Close fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </DialogContent>
+            <DialogActions sx={{ px: 3, pb: 2 }}>
+              <input
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                style={{ display: 'none' }}
+                ref={postMediaInputRef}
+                onChange={handlePostMediaSelect}
+              />
+              <Button
+                onClick={() => postMediaInputRef.current?.click()}
+                startIcon={<Image />}
+              >
+                Add Media
+              </Button>
+              <Box sx={{ flex: 1 }} />
+              <Button onClick={handlePostDialogClose}>Cancel</Button>
+              <Button
+                onClick={handleCreatePost}
+                variant="contained"
+                disabled={!newPostContent.trim() || isPostingLoading}
+              >
+                {isPostingLoading ? 'Posting...' : 'Post'}
+              </Button>
+            </DialogActions>
+          </Dialog>
+        </Container>
+      </Box>
+    </>
   );
 };
 

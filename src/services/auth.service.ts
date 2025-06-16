@@ -28,10 +28,11 @@ import {
   query, 
   where, 
   getDocs,
-  arrayRemove
+  arrayRemove,
+  writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { User, UserType } from '../types/user';
+import { User, UserType, UserProfile, VerificationStep } from '../types/user';
 import { supabase } from '../config/supabase';
 
 const handleAuthError = (error: AuthError): never => {
@@ -48,33 +49,33 @@ const handleAuthError = (error: AuthError): never => {
       message = 'Password must be at least 6 characters long.';
       break;
     case 'auth/user-not-found':
-      message = 'Account not found. Please sign up first.';
+      message = 'No account found with this email. Please check your email or create a new account.';
       break;
     case 'auth/wrong-password':
-      message = 'Incorrect password. Please try again.';
-      break;
-    case 'auth/too-many-requests':
-      message = 'Too many failed attempts. Please try again later.';
-      break;
-    case 'auth/network-request-failed':
-      message = 'Network error. Please check your internet connection.';
-      break;
-    case 'auth/requires-recent-login':
-      message = 'Please sign out and sign in again before deleting your account.';
+      message = 'Incorrect password. Please check your password and try again.';
       break;
     case 'auth/invalid-credential':
-      message = 'Invalid login credentials. Please check your email and password.';
+      message = 'The email or password you entered is incorrect. Please try again.';
+      break;
+    case 'auth/too-many-requests':
+      message = 'Too many failed login attempts. Please wait a few minutes before trying again.';
+      break;
+    case 'auth/network-request-failed':
+      message = 'Unable to connect. Please check your internet connection and try again.';
+      break;
+    case 'auth/requires-recent-login':
+      message = 'For security reasons, please sign out and sign in again to continue.';
       break;
     case 'auth/operation-not-allowed':
-      message = 'This login method is not enabled. Please try another method.';
+      message = 'This login method is currently not available. Please try another way to sign in.';
       break;
     case 'auth/popup-closed-by-user':
-      message = 'Login popup was closed. Please try again.';
+      message = 'The sign-in window was closed. Please try signing in again.';
       break;
     default:
       // Don't expose internal error details to users
       console.error('Auth error:', error);
-      message = 'An error occurred. Please try again.';
+      message = 'Something went wrong. Please try again later.';
   }
 
   throw new Error(message);
@@ -125,6 +126,7 @@ const createUserDocument = async (
     phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
+    verificationStep: 'email',
     privacySettings: {
       profileVisibility: 'public',
       allowMessagesFrom: 'everyone',
@@ -184,15 +186,15 @@ const createUserDocument = async (
         verificationStatus: 'pending' as const
       }
     };
-  } else if (userType === 'team') {
+  } else if (userType === 'college') {
     typeSpecificData = {
-      teamInfo: {
-        teamName: '',
-        sport: '',
-        canMessageAthletes: false,
-        achievements: [],
-        roster: [],
-        openPositions: []
+      collegeInfo: {
+        name: '',
+        location: '',
+        division: '',
+        conference: '',
+        sports: [],
+        teams: []
       }
     };
   } else if (userType === 'sponsor') {
@@ -208,8 +210,7 @@ const createUserDocument = async (
   } else if (userType === 'media') {
     typeSpecificData = {
       mediaInfo: {
-        organization: '',
-        canMessageAthletes: false,
+        companyName: '',
         coverageAreas: [],
         mediaType: []
       }
@@ -226,14 +227,15 @@ const createUserDocument = async (
   return userData;
 };
 
-const formatUserData = (firebaseUser: any): User => {
+const formatUserData = (userCredential: UserCredential, userType?: string): User => {
+  const { user: firebaseUser } = userCredential;
   return {
     id: firebaseUser.uid,
     uid: firebaseUser.uid,
     email: firebaseUser.email || '',
     displayName: firebaseUser.displayName || '',
     photoURL: firebaseUser.photoURL || undefined,
-    userType: 'athlete',
+    userType: (userType as User['userType']) || 'athlete',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
@@ -241,11 +243,21 @@ const formatUserData = (firebaseUser: any): User => {
     location: '',
     verified: false,
     blocked: false,
+    isAdmin: false,
     emailVerified: firebaseUser.emailVerified,
     phoneNumber: firebaseUser.phoneNumber || '',
     phoneVerified: false,
-    isAdmin: false,
+    socialLinks: {
+      instagram: '',
+      twitter: '',
+      linkedin: '',
+      youtube: '',
+    },
+    followers: [],
+    following: [],
+    connections: [],
     verificationStatus: 'none',
+    verificationStep: 'email',
     privacySettings: {
       profileVisibility: 'public',
       allowMessagesFrom: 'everyone',
@@ -253,16 +265,7 @@ const formatUserData = (firebaseUser: any): User => {
       showLocation: true,
       showAcademicInfo: true,
       showAthleteStats: true
-    },
-    socialLinks: {
-      instagram: '',
-      twitter: '',
-      linkedin: '',
-      youtube: ''
-    },
-    followers: [],
-    following: [],
-    connections: []
+    }
   };
 };
 
@@ -307,6 +310,7 @@ export const registerUser = async (
       phoneVerified: false,
       isAdmin: false,
       verificationStatus: 'none',
+      verificationStep: 'email',
       privacySettings: {
         profileVisibility: 'public',
         allowMessagesFrom: 'everyone',
@@ -332,6 +336,11 @@ export const registerUser = async (
     // Send email verification
     await sendEmailVerification(user);
 
+    // Update verification step to ensure user starts at email verification
+    await updateDoc(doc(db, 'users', user.uid), {
+      verificationStep: 'email'
+    });
+
     return { user, userData, userType };
   } catch (error: any) {
     console.error('Registration error:', error);
@@ -349,19 +358,32 @@ export const checkEmailVerification = async (): Promise<boolean> => {
     throw new Error('No user is currently signed in');
   }
 
-  // Reload the user to get the latest emailVerified status
-  await reload(user);
-  
-  if (user.emailVerified) {
-    // Update the user document in Firestore with emailVerified status
-    const userRef = doc(db, 'users', user.uid);
-    await updateDoc(userRef, {
-      emailVerified: true,
-      updatedAt: new Date().toISOString()
-    });
+  try {
+    // Reload the user to get the latest emailVerified status
+    await reload(user);
+    
+    if (user.emailVerified) {
+      // Get current user data from Firestore
+      const userRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userRef);
+      const userData = userDoc.data();
+
+      // Only update if not already verified in Firestore
+      if (!userData?.emailVerified) {
+        // Update the user document in Firestore with emailVerified status
+        await updateDoc(userRef, {
+          emailVerified: true,
+          verificationStep: 'phone',
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
+    
+    return user.emailVerified;
+  } catch (error) {
+    console.error('Error checking email verification:', error);
+    throw error;
   }
-  
-  return user.emailVerified;
 };
 
 export const loginUser = async (email: string, password: string): Promise<FirebaseUser> => {
@@ -370,7 +392,7 @@ export const loginUser = async (email: string, password: string): Promise<Fireba
     return userCredential.user;
   } catch (error: any) {
     console.error('Login error:', error);
-    throw new Error(error.message);
+    return handleAuthError(error);
   }
 };
 
@@ -381,9 +403,36 @@ export const resendVerificationEmail = async () => {
   }
   
   try {
+    // Check if email is already verified
+    await reload(user);
+    if (user.emailVerified) {
+      return { verified: true };
+    }
+
+    // Get the last email sent timestamp from localStorage
+    const lastEmailSent = localStorage.getItem('lastVerificationEmailSent');
+    const cooldownPeriod = 60 * 1000; // 60 seconds cooldown
+
+    if (lastEmailSent) {
+      const timeSinceLastEmail = Date.now() - parseInt(lastEmailSent);
+      if (timeSinceLastEmail < cooldownPeriod) {
+        const remainingTime = Math.ceil((cooldownPeriod - timeSinceLastEmail) / 1000);
+        throw new Error(`Please wait ${remainingTime} seconds before requesting another verification email.`);
+      }
+    }
+
+    // Send the verification email
     await sendEmailVerification(user);
+    
+    // Store the timestamp
+    localStorage.setItem('lastVerificationEmailSent', Date.now().toString());
+    
+    return { sent: true };
   } catch (error) {
     console.error('Error sending verification email:', error);
+    if (error instanceof Error && error.toString().includes('auth/too-many-requests')) {
+      throw new Error('Too many verification email requests. Please wait a few minutes before trying again.');
+    }
     throw error;
   }
 };
@@ -424,13 +473,15 @@ export const reauthenticateUser = async (email: string, password: string): Promi
       throw new Error('No user is currently signed in');
     }
 
+    // Make sure the email matches the current user's email
+    if (email !== user.email) {
+      throw new Error('The provided email does not match your account email');
+    }
+
     const credential = EmailAuthProvider.credential(email, password);
     await reauthenticateWithCredential(user, credential);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error re-authenticating:', error);
-<<<<<<< Updated upstream
-    throw error;
-=======
     if (error.code === 'auth/wrong-password') {
       throw new Error('Incorrect password. Please try again.');
     } else if (error.code === 'auth/invalid-credential') {
@@ -446,11 +497,10 @@ export const reauthenticateUser = async (email: string, password: string): Promi
     }
     // If it's our custom error from the email check above, pass it through
     if (error.message && !error.code) {
-    throw error;
+      throw error;
     }
     // For any other errors
     throw new Error('Failed to verify your identity. Please try again.');
->>>>>>> Stashed changes
   }
 };
 
@@ -458,316 +508,34 @@ export const deleteUserAccount = async (email: string, password: string): Promis
   try {
     const user = auth.currentUser;
     if (!user) {
-      throw new Error('Please sign in to delete your account.');
+      throw new Error('No user is currently signed in');
     }
 
-    // First, re-authenticate the user
-<<<<<<< Updated upstream
-    try {
-      await reauthenticateUser(email, password);
-    } catch (error: any) {
-      if (error.code === 'auth/wrong-password') {
-        throw new Error('Incorrect password. Please try again.');
-=======
-      await reauthenticateUser(email, password);
+    // First, reauthenticate the user
+    await reauthenticateUser(email, password);
 
     try {
-      // 1. Delete the user's own document first
-    const userRef = doc(db, 'users', user.uid);
-    const userDoc = await getDoc(userRef);
-    
-      if (userDoc.exists()) {
-        const userData = userDoc.data() as User;
-    
-        // 2. Delete user's posts
-        const postsQuery = query(
-          collection(db, 'posts'),
-          where('authorId', '==', user.uid)
-    );
-        const postDocs = await getDocs(postsQuery);
-        const postDeletePromises = postDocs.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(postDeletePromises);
+      // Delete Firestore document first
+      const userRef = doc(db, 'users', user.uid);
+      await deleteDoc(userRef);
+      console.log('Firestore document deleted');
 
-        // 3. Delete user's messages
-    const messagesQuery = query(
-      collection(db, 'messages'),
-      where('senderId', '==', user.uid)
-    );
-    const messageDocs = await getDocs(messagesQuery);
-        const messageDeletePromises = messageDocs.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(messageDeletePromises);
-
-        // 4. Delete user's notifications
-    const notificationsQuery = query(
-      collection(db, 'notifications'),
-      where('userId', '==', user.uid)
-    );
-    const notificationDocs = await getDocs(notificationsQuery);
-        const notificationDeletePromises = notificationDocs.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(notificationDeletePromises);
-
-        // 5. Delete verification requests
-        const verificationQuery = query(
-          collection(db, 'verifications'),
-          where('userId', '==', user.uid)
-    );
-        const verificationDocs = await getDocs(verificationQuery);
-        const verificationDeletePromises = verificationDocs.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(verificationDeletePromises);
-
-        // 6. Update other users' references in batches
-        const batch = writeBatch(db);
-
-        // Remove from followers' following lists
-      if (userData.followers?.length) {
-        for (const followerId of userData.followers) {
-            const followerRef = doc(db, 'users', followerId);
-            batch.update(followerRef, {
-              following: arrayRemove(user.uid)
-            });
-        }
-      }
-
-        // Remove from following users' followers lists
-      if (userData.following?.length) {
-        for (const followingId of userData.following) {
-            const followingRef = doc(db, 'users', followingId);
-            batch.update(followingRef, {
-              followers: arrayRemove(user.uid)
-            });
-        }
-      }
-
-      // Remove from connections
-      if (userData.connections?.length) {
-        for (const connectionId of userData.connections) {
-            const connectionRef = doc(db, 'users', connectionId);
-            batch.update(connectionRef, {
-              connections: arrayRemove(user.uid)
-            });
-        }
-      }
-
-        // Commit the batch update
-        await batch.commit();
-
-        // 7. Delete the user document itself
-        await deleteDoc(userRef);
-
-        // 8. Finally, delete the Firebase Auth account
+      // Then delete the auth account
+      await deleteUser(user);
+      console.log('Auth account deleted');
+    } catch (error) {
+      console.error('Error during deletion process:', error);
+      // If Firestore deletion fails but we can still delete the auth account
+      if (error instanceof Error && error.toString().includes('permission')) {
         await deleteUser(user);
-
-        console.log('Account successfully deleted');
+        console.log('Auth account deleted (after Firestore error)');
       } else {
-        // If user document doesn't exist, just delete the auth account
-        await deleteUser(user);
-        console.log('Auth account deleted (no Firestore document found)');
->>>>>>> Stashed changes
-      }
-      throw error;
-    }
-
-    // Get user data before deletion
-    const userRef = doc(db, 'users', user.uid);
-    const userDoc = await getDoc(userRef);
-    
-    if (!userDoc.exists()) {
-      console.warn('User document not found in Firestore');
-    }
-
-    // Delete user's data in this order:
-    
-    // 1. Delete verification requests and their associated Cloudinary documents
-    const verificationQuery = query(
-      collection(db, 'verifications'),
-      where('userId', '==', user.uid)
-    );
-    const verificationDocs = await getDocs(verificationQuery);
-    for (const doc of verificationDocs.docs) {
-      const verificationData = doc.data();
-      // Delete verification documents from Cloudinary
-      if (verificationData.documents) {
-        for (const docUrl of Object.values(verificationData.documents)) {
-          if (typeof docUrl === 'string' && docUrl.includes('cloudinary.com')) {
-            try {
-              const publicId = docUrl.split('/').pop()?.split('.')[0];
-              if (publicId) {
-                await fetch(`https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/destroy`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    public_id: publicId,
-                    api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
-                    api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
-                  }),
-                });
-              }
-            } catch (error) {
-              console.error('Error deleting verification document from Cloudinary:', error);
-            }
-          }
-        }
-      }
-      await deleteDoc(doc.ref);
-    }
-
-    // 2. Delete user's messages from both Firestore and Supabase
-    const messagesQuery = query(
-      collection(db, 'messages'),
-      where('senderId', '==', user.uid)
-    );
-    const messageDocs = await getDocs(messagesQuery);
-    for (const doc of messageDocs.docs) {
-      await deleteDoc(doc.ref);
-    }
-
-    // Delete messages from Supabase
-    try {
-      await supabase
-        .from('messages')
-        .delete()
-        .eq('sender_id', user.uid);
-    } catch (error) {
-      console.error('Error deleting messages from Supabase:', error);
-    }
-
-    // 3. Delete user's notifications
-    const notificationsQuery = query(
-      collection(db, 'notifications'),
-      where('userId', '==', user.uid)
-    );
-    const notificationDocs = await getDocs(notificationsQuery);
-    for (const doc of notificationDocs.docs) {
-      await deleteDoc(doc.ref);
-    }
-
-    // 4. Delete user's posts and their media from Cloudinary
-    const postsQuery = query(
-      collection(db, 'posts'),
-      where('authorId', '==', user.uid)
-    );
-    const postDocs = await getDocs(postsQuery);
-    for (const doc of postDocs.docs) {
-      const postData = doc.data();
-      // Delete post media from Cloudinary
-      if (postData.media && Array.isArray(postData.media)) {
-        for (const mediaItem of postData.media) {
-          if (mediaItem.url && mediaItem.url.includes('cloudinary.com')) {
-            try {
-              const publicId = mediaItem.path || mediaItem.url.split('/').pop()?.split('.')[0];
-              if (publicId) {
-                await fetch(`https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/destroy`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    public_id: publicId,
-                    api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
-                    api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
-                  }),
-                });
-              }
-            } catch (error) {
-              console.error('Error deleting post media from Cloudinary:', error);
-            }
-          }
-        }
-      }
-      await deleteDoc(doc.ref);
-    }
-
-    // 5. Remove user from other users' followers/following/connections lists
-    if (userDoc.exists()) {
-      const userData = userDoc.data() as User;
-      const promises: Promise<void>[] = [];
-
-      // Remove from followers' following list
-      if (userData.followers?.length) {
-        for (const followerId of userData.followers) {
-          promises.push(
-            updateDoc(doc(db, 'users', followerId), {
-              following: arrayRemove(user.uid)
-            })
-          );
-        }
-      }
-
-      // Remove from following users' followers list
-      if (userData.following?.length) {
-        for (const followingId of userData.following) {
-          promises.push(
-            updateDoc(doc(db, 'users', followingId), {
-              followers: arrayRemove(user.uid)
-            })
-          );
-        }
-      }
-
-      // Remove from connections
-      if (userData.connections?.length) {
-        for (const connectionId of userData.connections) {
-          promises.push(
-            updateDoc(doc(db, 'users', connectionId), {
-              connections: arrayRemove(user.uid)
-            })
-          );
-        }
-      }
-
-      await Promise.all(promises);
-    }
-
-    // 6. Delete user's profile picture from Cloudinary if it exists
-    if (userDoc.exists()) {
-      const userData = userDoc.data() as User;
-      if (userData.photoURL && userData.photoURL.includes('cloudinary.com')) {
-        try {
-          const publicId = userData.photoURL.split('/').pop()?.split('.')[0];
-          if (publicId) {
-            await fetch(`https://api.cloudinary.com/v1_1/${process.env.REACT_APP_CLOUDINARY_CLOUD_NAME}/destroy`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                public_id: publicId,
-                api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
-                api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
-              }),
-            });
-          }
-        } catch (error) {
-          console.error('Error deleting profile picture from Cloudinary:', error);
-        }
+        throw error;
       }
     }
-
-    // 7. Delete user's presence data from Supabase
-    try {
-      await supabase
-        .from('presence')
-        .delete()
-        .eq('user_id', user.uid);
-    } catch (error) {
-      console.error('Error deleting presence data from Supabase:', error);
-    }
-
-    // 8. Delete user document from Firestore
-    await deleteDoc(userRef);
-
-    // 9. Finally, delete the auth account
-    await deleteUser(user);
-
-    console.log('Account successfully deleted');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error deleting account:', error);
-    if (error instanceof Error && 'code' in error) {
-      handleAuthError(error as AuthError);
-    }
-    throw error;
+    throw new Error('Failed to delete account. Please try again.');
   }
 };
 
@@ -819,5 +587,145 @@ export const verifyPhoneNumber = async (credential: PhoneAuthCredential): Promis
   } catch (error) {
     console.error('Error verifying phone number:', error);
     throw error;
+  }
+};
+
+export const createUserProfile = async (
+  uid: string,
+  data: Partial<UserProfile>
+): Promise<void> => {
+  try {
+    const userRef = doc(db, 'users', uid);
+    const timestamp = new Date().toISOString();
+    
+    // Create a base profile with required fields
+    const baseProfile = {
+      uid,
+      email: data.email || '',
+      displayName: data.displayName || '',
+      photoURL: data.photoURL || '',  // Set empty string as default
+      userType: data.userType || 'athlete',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      verified: false,
+      verificationStatus: 'none',
+      verificationStep: 'email',
+      bio: '',
+      location: '',
+      socialLinks: {
+        instagram: '',
+        twitter: '',
+        linkedin: '',
+        youtube: ''
+      },
+      followers: [],
+      following: [],
+      connections: [],
+      privacySettings: {
+        profileVisibility: 'public',
+        allowMessagesFrom: 'everyone',
+        showEmail: true,
+        showLocation: true,
+        showAcademicInfo: true,
+        showAthleteStats: true
+      }
+    };
+
+    // Add type-specific info if present
+    const userProfile = {
+      ...baseProfile,
+      ...(data.athleteInfo && { athleteInfo: data.athleteInfo }),
+      ...(data.coachInfo && { coachInfo: data.coachInfo }),
+      ...(data.collegeInfo && { collegeInfo: data.collegeInfo }),
+      ...(data.sponsorInfo && { sponsorInfo: data.sponsorInfo }),
+      ...(data.mediaInfo && { mediaInfo: data.mediaInfo })
+    };
+
+    await setDoc(userRef, userProfile);
+  } catch (error) {
+    console.error('Error creating user profile:', error);
+    throw error;
+  }
+};
+
+export const handleUserTypeChange = (userType: UserType) => {
+  if (userType === 'athlete') {
+    return {
+      athleteInfo: {
+        sports: [],
+        academicInfo: {
+          currentSchool: '',
+          graduationYear: ''
+        },
+        verificationStatus: 'pending',
+        media: [],
+        memberships: [],
+        interests: [],
+        activities: [],
+        awards: [],
+        achievements: [],
+        eligibility: {
+          isEligible: true
+        },
+        recruitingStatus: 'open'
+      }
+    };
+  } else if (userType === 'coach') {
+    return {
+      coachInfo: {
+        specialization: [],
+        experience: '',
+        certifications: [],
+        canMessageAthletes: false,
+        verificationStatus: 'pending'
+      }
+    };
+  } else if (userType === 'college') {
+    return {
+      collegeInfo: {
+        name: '',
+        location: '',
+        division: '',
+        conference: '',
+        sports: [],
+        teams: []
+      }
+    };
+  } else if (userType === 'sponsor') {
+    return {
+      sponsorInfo: {
+        companyName: '',
+        industry: '',
+        canMessageAthletes: false,
+        sponsorshipTypes: [],
+        activeOpportunities: []
+      }
+    };
+  } else if (userType === 'media') {
+    return {
+      mediaInfo: {
+        companyName: '',
+        coverageAreas: [],
+        mediaType: []
+      }
+    };
+  } else {
+    return {};
+  }
+};
+
+export const updateUserVerificationStep = async (
+  userId: string,
+  step: VerificationStep
+): Promise<void> => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      verificationStep: step,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error updating verification step:', error);
+    throw new Error('Failed to update verification step');
   }
 }; 

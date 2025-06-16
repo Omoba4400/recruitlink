@@ -175,14 +175,14 @@ const LeftSidebar = () => {
           { icon: <PeopleIcon />, label: 'Connections', path: '/connections' },
           { icon: <SponsorshipIcon />, label: 'Sponsorships', path: '/sponsorships' },
         ];
-      case 'team':
+      case 'college':
         return [
-          { icon: <HomeIcon />, label: 'Feed', path: '/home', emoji: '👥' },
-          { icon: <GroupsIcon />, label: 'Team Roster', path: '/roster' },
-          { icon: <SearchIcon />, label: 'Scouting', path: '/scouting' },
+          { icon: <HomeIcon />, label: 'Feed', path: '/home', emoji: '🎓' },
+          { icon: <GroupsIcon />, label: 'Team Management', path: '/team-management' },
+          { icon: <SearchIcon />, label: 'Recruitment', path: '/recruitment' },
           { icon: <EventIcon />, label: 'Events', path: '/events' },
           { icon: <MailIcon />, label: 'Applications', path: '/applications' },
-          { icon: <AssessmentIcon />, label: 'Stats', path: '/stats' },
+          { icon: <AssessmentIcon />, label: 'Team Stats', path: '/team-stats' },
         ];
       default:
         return [];
@@ -755,7 +755,19 @@ const MainFeed = () => {
           <Avatar 
             src={user?.photoURL} 
             alt={user?.displayName || 'User'}
-            sx={{ bgcolor: 'primary.main' }}
+            sx={{ 
+              bgcolor: 'primary.main',
+              width: { xs: 48, sm: 40 },
+              height: { xs: 48, sm: 40 },
+              mr: { xs: 3, sm: 2 }
+            }}
+            imgProps={{
+              onError: (e) => {
+                // If image fails to load, show first letter of name
+                const imgElement = e.target as HTMLImageElement;
+                imgElement.style.display = 'none';
+              }
+            }}
           >
             {user?.displayName?.[0]?.toUpperCase()}
           </Avatar>
@@ -881,10 +893,12 @@ const MainFeed = () => {
 
       {/* Role-specific Feed Header */}
       <Typography variant="h6" gutterBottom>
-        {user?.userType === 'athlete' && 'Your Performance & Updates'}
-        {user?.userType === 'coach' && 'Athlete Insights & Applications'}
-        {user?.userType === 'team' && 'Team Updates & Opportunities'}
-        {user?.userType === 'sponsor' && 'Sponsorship Analytics & Requests'}
+        {user?.userType === 'athlete' && 'Share your athletic journey'}
+        {user?.userType === 'coach' && 'Connect with athletes'}
+        {user?.userType === 'college' && 'Manage sports programs'}
+        {user?.userType === 'sponsor' && 'Support athletes'}
+        {user?.userType === 'media' && 'Cover sports stories'}
+        {user?.userType === 'fan' && 'Follow athletes'}
       </Typography>
 
       {/* Posts Feed */}
@@ -1159,10 +1173,12 @@ const MainFeed = () => {
           <Typography variant="h6">Tips & Insights</Typography>
         </Box>
         <Typography variant="body2" color="text.secondary">
-          {user?.userType === 'athlete' && 'Training tips and performance insights'}
-          {user?.userType === 'coach' && 'Recruiting strategies and athlete development'}
-          {user?.userType === 'team' && 'Team management and event planning'}
-          {user?.userType === 'sponsor' && 'Sponsorship opportunities and brand growth'}
+          {user?.userType === 'athlete' && 'Share updates and showcase achievements'}
+          {user?.userType === 'coach' && 'Manage recruitment'}
+          {user?.userType === 'college' && 'Connect with recruits'}
+          {user?.userType === 'sponsor' && 'Discover talent'}
+          {user?.userType === 'media' && 'Share sports coverage'}
+          {user?.userType === 'fan' && 'Stay updated'}
         </Typography>
       </Paper>
     </Box>

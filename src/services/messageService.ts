@@ -1,7 +1,23 @@
-import { supabase, Message, Conversation } from '../config/supabase';
-import { User } from '../types/user';
+import { supabase } from '../config/supabase';
 
-export type { Message, Conversation };
+export interface Message {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  conversation_id: string;
+  created_at: string;
+  read: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  participants: string[];
+  last_message?: string;
+  last_message_time?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 class MessageService {
   // Send a message
@@ -60,64 +76,7 @@ class MessageService {
     return messages;
   }
 
-  // Get user conversations
-  async getUserConversations(userId: string): Promise<Conversation[]> {
-    const { data: conversations, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .contains('participants', [userId])
-      .order('last_message_time', { ascending: false });
-
-    if (error) throw error;
-    return conversations;
-  }
-
-  // Mark messages as read
-  async markMessagesAsRead(conversationId: string, userId: string): Promise<void> {
-    const { error } = await supabase
-      .from('messages')
-      .update({ read: true })
-      .eq('conversation_id', conversationId)
-      .eq('receiver_id', userId)
-      .eq('read', false);
-
-    if (error) throw error;
-  }
-
-  // Get unread message count
-  async getUnreadCount(userId: string): Promise<number> {
-    const { count, error } = await supabase
-      .from('messages')
-      .select('*', { count: 'exact' })
-      .eq('receiver_id', userId)
-      .eq('read', false);
-
-    if (error) throw error;
-    return count || 0;
-  }
-
-  // Delete message
-  async deleteMessage(messageId: string, userId: string): Promise<void> {
-    const { error } = await supabase
-      .from('messages')
-      .delete()
-      .eq('id', messageId)
-      .eq('sender_id', userId);
-
-    if (error) throw error;
-  }
-
-  // Update user presence
-  async updatePresence(userId: string, online: boolean): Promise<void> {
-    if (online) {
-      await supabase.channel(`presence:${userId}`).track({ 
-        user_id: userId,
-        online_at: new Date().toISOString()
-      });
-    }
-  }
-
-  // Add subscription methods
+  // Subscribe to messages in a conversation
   subscribeToMessages(conversationId: string, callback: (messages: Message[]) => void) {
     const channel = supabase
       .channel(`messages:${conversationId}`)
@@ -145,6 +104,7 @@ class MessageService {
     };
   }
 
+  // Subscribe to user's conversations
   subscribeToConversations(userId: string, callback: (conversations: Conversation[]) => void) {
     const channel = supabase
       .channel(`conversations:${userId}`)
@@ -172,7 +132,19 @@ class MessageService {
     };
   }
 
-  // Add this method
+  // Mark messages as read for a user in a conversation
+  async markMessagesAsRead(conversationId: string, userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('messages')
+      .update({ read: true })
+      .eq('conversation_id', conversationId)
+      .eq('receiver_id', userId)
+      .eq('read', false);
+
+    if (error) throw error;
+  }
+
+  // Get or create a conversation between two users
   async getOrCreateConversation(userId1: string, userId2: string): Promise<string> {
     // Check for existing conversation
     const { data: existingConversations } = await supabase

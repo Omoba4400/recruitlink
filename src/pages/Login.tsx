@@ -46,6 +46,7 @@ const formatUserData = (firebaseUser: any): User => {
     phoneVerified: false,
     isAdmin: false,
     verificationStatus: 'none',
+    verificationStep: 'email',
     privacySettings: {
       profileVisibility: 'public',
       allowMessagesFrom: 'everyone',
@@ -114,7 +115,7 @@ const Login: React.FC = () => {
       } else {
         throw new Error('Login failed: No user data received');
       }
-    } catch (err) {
+    } catch (err: any) {
       const errorMessage = err instanceof Error ? err.message : 'An error occurred during login';
       setError(errorMessage);
       enqueueSnackbar(errorMessage, { variant: 'error' });
@@ -215,29 +216,57 @@ const Login: React.FC = () => {
         }}
       >
         <IconButton
-          onClick={() => navigate('/')}
+          component={RouterLink}
+          to="/"
           sx={{
             position: 'absolute',
             top: -40,
             left: 0,
-            color: 'primary.main',
           }}
         >
           <HomeIcon />
         </IconButton>
 
-        <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
-          <Typography component="h1" variant="h5" align="center" sx={{ mb: 3 }}>
+        <Paper
+          elevation={3}
+          sx={{
+            p: 4,
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+          }}
+        >
+          <Typography component="h1" variant="h5" sx={{ mb: 3 }}>
             Sign In
           </Typography>
-          
+
           {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
+            <Alert severity="error" sx={{ width: '100%', mb: 2 }}>
               {error}
             </Alert>
           )}
 
-          <Box component="form" onSubmit={handleSubmit}>
+          {needsVerification && (
+            <Alert severity="warning" sx={{ width: '100%', mb: 2 }}>
+              Please verify your email address. 
+              <Button
+                size="small"
+                onClick={async () => {
+                  try {
+                    await resendVerificationEmail();
+                    enqueueSnackbar('Verification email sent!', { variant: 'success' });
+                  } catch (err) {
+                    enqueueSnackbar('Failed to send verification email', { variant: 'error' });
+                  }
+                }}
+              >
+                Resend verification email
+              </Button>
+            </Alert>
+          )}
+
+          <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
             <TextField
               margin="normal"
               required
@@ -249,7 +278,7 @@ const Login: React.FC = () => {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              error={!!error && error.includes('email')}
+              error={!!error && error.toLowerCase().includes('email')}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -263,7 +292,7 @@ const Login: React.FC = () => {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              error={!!error && error.includes('password')}
+              error={!!error && error.toLowerCase().includes('password')}
               sx={{ mb: 3 }}
             />
             <Button
@@ -273,7 +302,14 @@ const Login: React.FC = () => {
               disabled={loading}
               sx={{ mb: 2 }}
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? (
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
+                  Signing in...
+                </Box>
+              ) : (
+                'Sign In'
+              )}
             </Button>
             <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Link

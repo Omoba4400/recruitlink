@@ -1,6 +1,32 @@
 {
   "indexes": [
     {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "blocked", "order": "ASCENDING" },
+        { "fieldPath": "userType", "order": "ASCENDING" },
+        { "fieldPath": "uid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "connectionRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "receiverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "posts",
       "queryScope": "COLLECTION",
       "fields": [
@@ -29,28 +55,16 @@
       "collectionGroup": "events",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "creatorId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
+        { "fieldPath": "creatorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
       "collectionGroup": "verifications",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     }
   ],
