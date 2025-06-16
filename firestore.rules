@@ -1,0 +1,283 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isValidUserData() {
+      let userData = request.resource.data;
+      return userData.size() > 0 
+        && userData.uid is string
+        && userData.email is string
+        && userData.displayName is string
+        && userData.userType in ['athlete', 'coach', 'college', 'sponsor', 'media']
+        && userData.createdAt is string
+        && userData.updatedAt is string;
+    }
+
+    function isValidProfileUpdate() {
+      let allowedFields = [
+        'displayName', 'photoURL', 'bannerURL', 'bio', 'location', 'socialLinks',
+        'updatedAt', 'verified', 'athleteInfo', 'coachInfo', 'collegeInfo',
+        'sponsorInfo', 'mediaInfo', 'email', 'uid', 'userType', 'createdAt'
+      ];
+      return true; // Allow all updates for now, can be restricted later
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Removed unused isVerified function as it's not being used in any rules
+
+    function isValidVerificationDoc() {
+      let incoming = request.resource.data;
+      return incoming.size() <= 1000000  // Max 1MB
+        && incoming.type in ['studentId', 'athleteId', 'transcript', 'other']
+        && incoming.fileUrl is string
+        && incoming.fileName is string
+        && incoming.mimeType in ['image/jpeg', 'image/png', 'application/pdf']
+        && incoming.uploadedAt is string;
+    }
+
+    function isUserAuthenticated(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Allow admins to read aggregation results
+    match /{path=**}/aggregations/{aggregationId} {
+      allow read: if isAdmin();
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+      allow list: if isAdmin();
+      allow get: if isAdmin();
+      
+      // User status subcollection
+      match /status/{document} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && request.auth.uid == userId;
+      }
+
+      // User connections subcollection
+      match /connections/{connectionId} {
+        allow read: if isAuthenticated();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+
+      // User profile data
+      match /profile/{document=**} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      }
+    }
+
+    // Posts collection
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Comments collection
+    match /comments/{commentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Events collection
+    match /events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow list: if isAdmin();
+      allow get: if isAdmin();
+    }
+
+    // Messages collection
+    match /messages/{messageId} {
+      allow read: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // Reports collection
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+      allow list: if isAdmin();
+      allow get: if isAdmin();
+    }
+
+    // Analytics collection
+    match /analytics/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Verification requests
+    match /verifications/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        resource.data.userId == request.auth.uid && 
+        request.resource.data.status == resource.data.status
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow list: if isAdmin();
+      allow get: if isAdmin();
+    }
+    
+    // Verification documents
+    match /verification_documents/{docId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == request.resource.data.userId || isAdmin()
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == request.auth.uid &&
+        isValidVerificationDoc()
+      );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Status collection for online presence
+    match /users/{userId}/status/{document} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Feed collection
+    match /feed/{feedId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // User feeds subcollection
+    match /userFeeds/{userId}/posts/{postId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && (
+        // Allow creating notifications for users you interact with
+        request.resource.data.userId != request.auth.uid && (
+          // Connection requests
+          (request.resource.data.type == 'connection_request' && 
+            exists(/databases/$(database)/documents/users/$(request.resource.data.userId))) ||
+          // Post interactions
+          (request.resource.data.type in ['post_like', 'post_comment'] && 
+            exists(/databases/$(database)/documents/posts/$(request.resource.data.postId))) ||
+          // Messages
+          (request.resource.data.type == 'new_message' && 
+            exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId))) ||
+          // Follows
+          (request.resource.data.type == 'new_follower' && 
+            exists(/databases/$(database)/documents/users/$(request.resource.data.userId)))
+        )
+      );
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Conversations collection rules
+    match /conversations/{conversationId} {
+      allow read: if isAuthenticated() 
+        && request.auth.uid in resource.data.participants;
+      allow create: if isAuthenticated() 
+        && request.auth.uid in request.resource.data.participants;
+      allow update: if isAuthenticated() 
+        && request.auth.uid in resource.data.participants;
+      
+      // Messages subcollection rules
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && 
+                     request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow create: if isAuthenticated() && 
+                     request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow update, delete: if isAuthenticated() && 
+                            request.auth.uid == resource.data.senderId;
+      }
+    }
+    
+    // User FCM tokens collection rules
+    match /fcmTokens/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+
+    // Message read receipts
+    match /readReceipts/{receiptId} {
+      allow read: if isAuthenticated() 
+        && (resource.data.userId == request.auth.uid 
+        || resource.data.messageId in get(/databases/$(database)/documents/messages/$(resource.data.messageId)).data.participants);
+      allow write: if isAuthenticated() 
+        && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Connection requests collection
+    match /connectionRequests/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+  }
+} 
